@@ -1,0 +1,36 @@
+        networking_list = WidgetBase(
+            'status_network_list', DetailedList, '',
+            params={'labels':
+            [_('Device'), _('Bootproto'),
+            _('IPV4 Address'), _('IPV6 Address')]},
+            get_conf=datautil.read_status_datas)
+
+
+        status_buttons = WidgetBase(
+            'status_buttons', ButtonList, '',
+            params={'labels':
+            [_('Log Off'), _('Lock'), _('Restart'), _('Power Off')],
+            'callback':
+            [self.confirm_cmd, self.confirm_cmd,
+            self.confirm_cmd, self.confirm_cmd]})
+
+        resp_id = ConfirmDialog(message=warn_message).run_and_close()
+
+        class ConfirmDialog(gtk.MessageDialog):
+
+
+class ConfirmDialog(gtk.MessageDialog):
+
+    def __init__(self, parent=None, message="", buttons=gtk.BUTTONS_OK_CANCEL):
+        super(ConfirmDialog, self).__init__(
+            flags=gtk.DIALOG_MODAL,
+            type=gtk.MESSAGE_WARNING, buttons=buttons,
+            message_format=message)
+        self.set_position(gtk.WIN_POS_CENTER)
+        self.set_title(_("Continue?"))
+
+    def run_and_close(self):
+        resp_id = self.run()
+        self.destroy()
+        return resp_id
+        

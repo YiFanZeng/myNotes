@@ -1,0 +1,1777 @@
+#!/bin/bash
+#
+# Copyright MIRACLE LINUX CORPORATION all rights reserved. 
+#
+# $Id: bldpkg.functions,v 1.4 2009/07/24 06:17:45 leiwang Exp $
+#
+
+#set -x
+LANG=C
+
+CVSROOT=/home/cvsroot/CVS
+
+PRODUCT_CURRENT_VERSION=Bell
+PRODUCT_CURRENT_PROJECT=Bell
+CURRENT_BUILD_HOST=nodebuild.cloudtimes.com
+ISOSNAP=00Packages.conf
+prj_packager=root
+DATE=`date +%Y%m%d%H%M`
+RPMMAP=
+all_pkgs_num=
+_fail=
+_warning=
+_conflict_pkg=
+
+cmplist="tar.gz:gz:gzip tgz:gz:gzip tar.bz2:bz2:bzip2 tar.Z:Z:compress tar:tar:- wbm.gz:gz:gzip wbt.gz:gz:gzip wbt:gz:gzip"
+
+init_variables()
+{
+    prj=$PRODUCT_CURRENT_PROJECT
+    #ver=$prj
+    ver=
+
+    workdir=/vbuild/tmp/dtbld_$prj.$$
+    distdir=/vbuild/distfiles/$prj
+    pooldir=/vbuild/$prj/pool
+
+# added by Jarod.W to support autoupdate repo.
+    repodir=/storage/repo
+    pushrepo=off
+
+	virdir=
+    mksrc=off
+    mkbin=off
+    RPMMAP=$pooldir/SRPMS_RPMS_MAP
+
+    log=/vbuild/tmp/bldpkg_$prj-$DATE.$$.log
+
+    cvsdir=
+    owndir=
+    wdir=
+    pver=
+    revision=
+    _revision=
+    bld=off
+    prdct=off
+    cmpn=off
+    exp=
+    arch=x86_64
+    yes=off
+    pkgs=
+    cvsroot=${CVSROOT:-/home/cvsroot/CVS}
+    debuginfo=off
+    stripshared=off
+	quickmode=on
+    _install=off
+	#_pkg_install=off
+	_pkg_install=
+	#_sys_dir=`/usr/sbin/chroot $virdir /bin/rpm -ql filesystem`
+
+    export CVSROOT=$cvsroot
+
+    rm -f $log
+    touch $log
+
+    if [ "${TERM}" = xterm -o "${TERM}" = kterm ] ; then
+		E='[5m[31m'
+		p='[34m'
+		e='[31m'
+		w='[33m'
+		s='[5m'
+		r='[0m'
+	else
+		E=
+		p=
+		e=
+		s=
+		r=
+    fi
+
+    return 0
+}
+
+tolog() {
+    cat - | tee -a $log
+}
+
+showlog() {
+    if [ -f $log ] ; then
+		##y_or_n n 'open log file?'
+		##if [ $? = 0 ] ; then
+		#y_or_n n 'open log file now?'
+		#if [ $? = 1 ] ; then
+		#    ${PAGER:-more} $log
+		#    #yes=off
+		#    #y_or_n n 'remove the logfile?'
+		#else
+		#    echo "${s}PLEASE CHECK $log!!${r}"
+		#fi
+		y_or_n y 'keep the logfile?'
+		if [ $? = 1 ] ; then
+			echo "${s}* Removing log file ... ${r}" | tolog
+			rm -f $log
+		fi
+    fi
+    return 0
+}
+
+y_or_n()
+{
+    if [ "$yes" = "on" ]; then
+		echo | tolog
+		return 0 
+	fi
+
+    _dflt=${1:-n}
+    _msg=${2:-'OK?'}
+
+#    echo | tolog
+    while :
+    do
+		echo -n "$_msg (y/n) [$_dflt]: " | tolog
+		read _ans;
+		echo $_ans >> $log
+		case ${_ans:-$_dflt} in
+		  [Yy])
+		    echo "${p}Do it.${r}" | tolog
+		    _ret=0
+		    break
+		    ;;
+		  [Nn])
+		    echo "${w}Drop it.${r}" | tolog
+		    _ret=1
+		    break
+		    ;;
+		  *)
+		    echo 'Please answer y or n.'
+		    sleep 1
+		    continue
+		    ;;
+		esac
+    done
+
+    echo | tolog
+    return $_ret
+}
+
+cleanup_workdir()
+{
+    [ $keepflag = true ] && return 0
+
+    if [ -d $workdir ] ; then
+	echo "${s}* Removing working directory...${r}" | tolog
+	rm -rf $workdir
+    fi
+    if [ -d $vworkdir ] ; then
+	echo "${s}* Removing working directory in virbuild...${r}" | tolog
+	rm -rf $vworkdir
+    fi
+
+    echo "${p}Full log file is $log${r}" | tolog
+
+    return 0
+}
+
+create_repo()
+{
+    if [ "$pushrepo" = "on" ] ; then
+        echo "It will rebuild repo because you choose the copy the bin files into repo."
+        createrepo $repodir/
+        return $?
+    fi
+}
+
+reset_builddir()
+{
+    [ $keepflag = true ] && return 0
+
+    _dir=${1:-$vworkdir/rpmbuild}
+
+    rm -rf $_dir/SPECS/* $_dir/SOURCES/* $_dir/BUILD/*
+
+    return 0
+}
+
+error_exit()
+{
+    _msg=${1:-'***** Error *****.'}
+
+    echo "${E}$_msg${r}" | tolog
+
+    cleanup_workdir
+    showlog
+
+    exit 1
+}
+
+check_free_mem()
+{
+	echo | tolog
+	echo "${s}* Checking free mem ... ${r}" | tolog
+	# define safe_min_mem=500M
+	safe_min_mem=500
+	free_mem=`free -m|grep "buffers/cache:"|awk  '{ print $4}'`
+	n=1
+	while [ "$free_mem" -lt "$safe_min_mem" ]
+	do
+		echo "Memory too few. Waiting 1 minute..."
+		sleep 60
+		n=$((n+1))
+		[ "$n" -lt 60 ] && return 1
+	done
+}
+
+check_free_diskspace()
+{
+	echo | tolog
+	echo "${s}* Checking free disk space ... ${r}" | tolog
+	safe_min_df=500
+	free_space=`df -m $virdir/ | awk '{print $4}' | tail -1`
+	n=1
+	while [ "$free_space" -lt "$safe_min_df" ]
+	do
+		echo "Free disk space (${free_space}MB) of $virdir too few. Waiting 1 minute..."
+		sleep 60
+		n=$((n+1))
+		[ "$n" -gt 60 ] && return 1
+		free_space=`df -m $virdir/ | awk '{print $4}' | tail -1`
+	done
+}
+
+check_proc_sys()
+{
+	echo | tolog
+	echo "${s}* Checking /proc filesystem ... ${r}" | tolog
+    if [ ! -f $virdir/proc/cmdline ]; then
+        /usr/sbin/chroot $virdir mount /proc
+    fi
+
+	echo | tolog
+	echo "${s}* Checking /sys filesystem ... ${r}" | tolog
+    if [ ! -d $virdir/sys/kernel/ ]; then
+        /usr/sbin/chroot $virdir mount /sys
+    fi
+}
+
+check_dir()
+{
+    _dir=${1:-/noexistent}
+    _mkdir=${2:-off}
+
+    if [ ! -d $_dir ] ; then
+	if [ $_mkdir = on ] ; then
+	    echo "${s}* Creating directory: $_dir${r}" | tolog
+	    mkdir -p $_dir 2>&1 | tolog
+	    _st=$?
+		chmod 1777 $_dir
+	else
+	    echo "${e}$_dir: No such directory.${r}" | tolog
+	    _st=1
+	fi
+    else
+	if [ ! -x $_dir ] ; then
+	    echo "${e}$_dir: no permission.${r}" | tolog
+	    _st=1
+	fi
+    fi
+
+    return $_st
+}
+
+help_msg()
+{
+    echo "Usage: bldpkg [-j/-V prj] [-d distdir] [-w ownpkgdir] [-t pooldir] [-b] [-r] [-s] [-B] [-D] [-R] [-S] [-p] [-c] [-a arch] [-U virbuild_dir] [-v pkgver] [-y] [-h] [-I] [package_name(s)]"
+	echo "-j	project name. The default value is $prj"
+	echo "-d	distfiles directory. The default value is /vbuild/distfiles/$prj"
+	echo "-w	workspace directory. The default value is $workdir/$prj"
+	echo "-t	pool directory. The default value is $pooldir"
+	echo "-b	build both binary and source packages. The default value is true"
+	echo "-v	package version. When multiple packages, this option will be skipped."
+	echo "-r	revision of spec file. When multiple packages, this option will be skipped."
+	echo "-s	strip switch. The default value is true"
+	echo "-B	only build binary rpm package. The default value is false"
+	echo "-D	build debuginfo package. The default value is false"
+	echo "-Q	Quick mode, skip conliction checking. The default value is true"
+	echo "-C	Check mode, do conliction checking. The default value is false"
+	echo "-R	full rebuilding based on a revision of 00Packages.conf"
+	echo "-S	only built source rpm package. The default value is false"
+	echo "-p	move package(s) into pool directory after building done. The default value is true"
+	echo "-c	companion option. The default value is true"
+	echo "-a	architecturei type, such as i386, i686 and so on. The default value is $arch"
+	echo "-V	same as -j."
+	echo "-U	use specified virtual building environment."
+	echo "-y	aswer all questions with YES, default is false"
+	echo "-h	show this help message"
+	echo "-I	install the packge(s) after building, the default value is false. ONLY for administrator."
+	echo "DEFAULT: bldpkg -j $prj [-d /vbuild/distfiles/$prj] [-w $workdir/$prj] [-t $pooldir] [-a $arch] [-U virbld] [pkg1] [pkg2] ... "
+}
+
+parse_args()
+{
+    _bflg=off
+    _pflg=off
+    _cflg=off
+    _mksrc=off
+    _mkbin=off
+    _wflg=off
+    _tflg=off
+	_install=off
+	#_pkg_install=off
+	_pkg_install=
+	_fullbuild=off
+    keepflag=false
+	
+#set -x
+    while getopts t:r:sDQCSBId:U:w:bpca:v:j:V:RykhP opt
+    do
+	case $opt in
+	  t)
+	    pooldir=$OPTARG
+	    check_dir $pooldir on || return 1
+	    #mkdir -p $pooldir/RPMS
+	    #mkdir -p $pooldir/SRPMS
+	    #chown `ls -ld $pooldir |awk '{print $3}'`:`ls -ld $pooldir |awk '{print $4}'` $pooldir -R
+	    _tflg=on
+	    ;;
+	  r)
+	    revision=$OPTARG
+	    _revision=$OPTARG
+	    ;;
+	  s)
+	    stripshared=on
+	    ;;
+	  D)
+	    debuginfo=on
+	    ;;
+	  Q)
+		quickmode=on
+		;;
+	  C)
+		quickmode=off
+		;;
+	  S)
+	    _mksrc=on
+	    mksrc=on
+	    mkbin=off
+	    ;;
+	  B)
+	    _mkbin=on
+	    mkbin=on
+	    mksrc=off
+	    ;;
+	  I)
+	    _install=on
+	    ;;
+	  d)
+	    distdir=$OPTARG
+	    check_dir $distdir || return 1
+	    ;;
+	  w)
+	    owndir=$OPTARG
+	    check_dir $owndir/$prj|| return 1
+	    _wflg=on
+	    ;;
+	  R)
+		# Just full rebuilding based on the newest $ISOSNAP
+		echo "Just full rebuilding based on the newest $ISOSNAP"
+		_fullbuild=on
+		;;
+	  b)
+	    bld=on
+	    #exp=${exp}B
+	    exp=B
+	    _bflg=on
+	    ;;
+	  p)
+	    prdct=on
+	    #exp=${exp}P
+	    exp=PB
+	    _pflg=on
+	    ;;
+	  c)
+	    cmpn=on
+	    exp=${exp}C
+	    _cflg=on
+	    ;;
+	  a)
+	    arch=$OPTARG
+	    ;;
+	  v)
+	    pver=$OPTARG
+	    ;;
+	  U)
+	    virdir=$OPTARG
+	    ;;
+	  j|V)
+	    prj=$OPTARG
+	    ;;
+	  k)
+	    keepflag=true;;
+	  y)
+	    yes=on
+	    cpopt=-f
+	    ;;
+          P)
+            pushrepo=on
+            ;;
+	  h)
+		help_msg
+		exit 0
+		;;
+	  *)
+		help_msg
+		exit 1
+	esac
+    done
+
+	case $prj in
+	  Apatite|DT50|dt50)
+		prj="Apatite"
+		prj_packager=root
+		#PRODUCT_VERSION="5.0"
+		;;
+	  ApatiteNE|DT50NE|dt50ne)
+		prj="ApatiteNE"
+		#PRODUCT_VERSION="5.0NE"
+		;;
+	  Sylph|DT60|dt60|DT60SP1|dt60sp1)
+		prj="Sylph"
+		prj_packager=root
+		#PRODUCT_VERSION="6.0"
+		;;
+	  KunlunJade|Kunlunjade|kunlunjade|DT60SP2|dt60sp2|DT62|dt62|DT6.2|dt6.2)
+		prj="KunlunJade"
+		prj_packager=root
+		#PRODUCT_VERSION="6.2"
+		;;
+	  SuetJade|Suetjade|suetjade|DT60SP2U|DT6SP2U|dt60sp2u|dt6sp2u|DT62U|dt62u|DT6.2U|dt6.2u)
+		prj="SuetJade"
+		prj_packager=packager
+		#PRODUCT_VERSION="6.3"
+		;;
+	  SuetJade2011|Suetjade2011|suetjade2011|DT60SP3U|DT6SP3U|dt60sp3u|dt6sp3u|DT63U|dt63u|DT6.3U|dt6.3u|DT6.3.1|dt6.3.1)
+		prj="SuetJade2011"
+		prj_packager=packager
+		#PRODUCT_VERSION="6.3.1"
+		;;
+	  Olympics|DT70|dt70)
+		prj="Olympics"
+		prj_packager=packager
+		#PRODUCT_VERSION="7.0"
+		;;
+	  InMini|inmini|inMini|Inmini)
+		prj="InMini"
+		prj_packager=packager
+		#PRODUCT_VERSION="7.0"
+		;;
+	  XiZhi|xizhi|xiZhi|Xizhi)
+		prj="XiZhi"
+		prj_packager=packager
+		#PRODUCT_VERSION="7.0"
+		;;
+	  JointJade|jointjade|Jointjade)
+		prj="JointJade"
+		prj_packager=packager
+		#PRODUCT_VERSION="7.0"
+		;;
+	  newCerf|NEWCERF|newcerf)
+		prj="newCerf"
+		prj_packager=root
+		PRODUCT_VERSION="3.0"
+                virdir=/vbuild/vbuilddir/centos65v1/
+		;;
+	  Cerf|CERF|cerf)
+		prj="Cerf"
+		prj_packager=root
+		PRODUCT_VERSION="3.0"
+                #virdir=/vbuild/vbuilddir/centos64v1/
+                virdir=/vbuild/vbuilddir/centos64v2/ #yhadd
+		;;
+	  Bell|BELL|bell)
+		prj="Bell"
+		prj_packager=root
+		PRODUCT_VERSION="2.0"
+                ##virdir=/vbuild/vbuilddir/rhel63betav1/
+                virdir=/vbuild/vbuilddir/centos63v1/
+		;;
+	  CTNode|CTNODE|ctnode)
+		prj="CTNode"
+		prj_packager=root
+		PRODUCT_VERSION="1.0"
+		;;
+	  *)
+		echo "Project $prj is not supported"
+		return 1
+		;;
+	esac
+
+
+		ver=$prj
+	    check_dir /vbuild/$prj || return 1
+	    if [ $_tflg = off ]; then
+	    	pooldir=/vbuild/$prj/pool
+	    	check_dir $pooldir || return 1
+	    fi
+		workdir=/var/tmp/dtbld_$prj.$$
+		cvsdir=$workdir/$prj
+		distdir=/vbuild/distfiles/$prj
+		[ -n "$virdir" ] || virdir=/vbuild/vbuilddir/centos62v2
+		vworkdir=$virdir$workdir
+		rpmrc=$vworkdir/.rpmrc
+		rpmmacros=$vworkdir/.rpmmacros
+		rpmscript=$vworkdir/run_rpm
+		#rpminst_script=$vworkdir/run_rpminst
+		rpminst_script=$virdir/tmp/run_rpminst
+		RPMMAP=$pooldir/SRPMS_RPMS_MAP
+		log=/tmp/bldpkg_$prj-$DATE.$$.log
+		check_dir $virdir || return 1
+		_sys_dir=`/usr/sbin/chroot $virdir /bin/rpm -ql filesystem`
+
+#set +x
+    if [ $_wflg = on -a $_tflg = off ]; then
+	echo "Error: You SHOULD use -t <dir> to change the pool directory"
+	echo "       if you want to use -w option for testing!"
+	exit 1
+    fi
+
+    if [ $_wflg = on -a `(cd $pooldir; echo $PWD )` = "/vbuild/$prj/pool" ]; then
+	echo "Error: You CAN NOT use $pooldir for testing!"
+	echo "       Please use -t <dir> option to change the pool directory!"
+	exit 1
+    fi
+
+    if [ $_bflg = off -a $_pflg = off -a $_cflg = off ] ; then
+	bld=on
+	prdct=off
+	exp=B
+    fi
+
+    if [ $_mksrc = off -a $_mkbin = off ] ; then
+	mksrc=on
+	mkbin=on
+    fi
+
+    shift `expr $OPTIND - 1`
+    pkgs=$*
+
+	if [ "$_fullbuild" = "on" -a -n "$pkgs" ]; then
+		echo "${p}Full-rebuilding overpass Specific-building.${r}" | tolog
+		echo "${p}Only do Full-rebuilding${r}" | tolog
+		# unset pkgs to avoid conflicting with _fullbuild=on
+		pkgs=
+	fi
+
+    return 0
+}
+
+gen_rpmrc()
+{
+    echo "${s}* Creating rpmrc files...${r}" | tolog
+
+if false; then
+	if grep '^macrofiles:' $virdir/usr/lib/rpm/rpmrc >/dev/null 2>&1; then
+		echo "`grep '^macrofiles:' $virdir/usr/lib/rpm/rpmrc`:/usr/lib/rpm/asianux:$workdir/.rpmmacros" > $rpmrc || return 1
+		cp $rpmrc $vworkdir/rpmbuild/.rpmrc
+	else
+		cp /usr/lib/rpm/rpmrc $rpmrc
+	fi
+fi
+
+    if [ $debuginfo = "off" ]; then	
+	    echo "%_topdir $workdir/rpmbuild" > $rpmmacros || return 1
+    else
+    cat > $rpmmacros <<EOF
+%_topdir $workdir/rpmbuild
+%_enable_debug_packages 0 
+#
+#       Path to script that creates debug symbols in a /usr/lib/debug
+#       shadow tree.
+%__debug_install_post   \\
+   /usr/lib/rpm/find-debuginfo.sh %{_builddir}/%{?buildsubdir}\\
+%{nil}
+
+#       Template for debug information sub-package.
+# NOTE: This is a copy from rpm to get the ifnarch noarch fix, it can be removed later
+%debug_package \\
+%ifnarch noarch\\
+%global __debug_package 1\\
+%package debuginfo \\
+Summary: Debug information for package %{name}\\
+Group: Development/Debug\\
+%description debuginfo\\
+This package provides debug information for package %{name}.\\
+Debug information is useful when developing applications that use this\\
+package or when debugging this package.\\
+%files debuginfo -f debugfiles.list\\
+%defattr(-,root,root)\\
+%endif\\
+%{nil}
+
+%install %{?_enable_debug_packages:%{?buildsubdir:%{debug_package}}}\\
+%%install\\
+LANG=C\\
+export LANG\\
+unset DISPLAY\\
+%{nil}
+EOF
+    fi
+
+    if [ $stripshared = "on" ]; then	
+        cat >> $rpmmacros <<EOF
+%__os_install_post    \\
+    /usr/lib/rpm/brp-compress \\
+    /usr/lib/rpm/brp-strip %{__strip} \\
+    /usr/lib/rpm/brp-strip-shared %{__strip} \\
+    /usr/lib/rpm/brp-strip-static-archive %{__strip} \\
+    /usr/lib/rpm/brp-strip-comment-note %{__strip} %{__objdump} \\
+%{nil}
+EOF
+    fi
+
+# generate run_rpminst
+	echo  '#!/bin/bash' > $rpminst_script || return 1
+	echo  "rpm -Uvh $workdir/rpmbuild/RPMS/*/*.rpm \$2 >> /var/tmp/log.\$1-${DATE}.bb 2>&1 " >> $rpminst_script || return 1
+	chmod +x $rpminst_script
+
+    #echo '. /root/.bashrc' >> $rpmscript || return 1
+	cp /etc/skel/.bashrc /etc/skel/.bash_profile $vworkdir/
+    echo '#!/bin/bash' > $rpmscript || return 1
+	echo "export HOME=$workdir/" >> $rpmscript || return 1
+	echo "export PATH=/usr/lib/qt-3.3/bin:/usr/kerberos/sbin:/usr/kerberos/bin:/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/usr/X11R6/bin:/root/bin:\$PATH" >> $rpmscript || return 1
+    echo 'if [ "$3" = "tar" ]; then' >> $rpmscript || return 1
+		#echo -n "FORCE_UNSAFE_CONFIGURE=1 rpmbuild -\$1 \$5  " >> $rpmscript || return 1
+		echo -n "rpmbuild -\$1 \$5  --without debuginfo " >> $rpmscript || return 1
+    	echo "$workdir/rpmbuild/SPECS/\$2 > /var/tmp/log.\$3-\$4-${DATE}.\$1 2>&1" >> $rpmscript
+	echo 'else' >> $rpmscript || return 1
+    	echo -n "rpmbuild -\$1 \$5  --without debuginfo " >> $rpmscript || return 1
+    	echo "$workdir/rpmbuild/SPECS/\$2 > /var/tmp/log.\$3-\$4-${DATE}.\$1 2>&1" >> $rpmscript
+	echo 'fi' >> $rpmscript
+    echo 'exit $?' >> $rpmscript || return 1
+    chmod +x $rpmscript
+
+    return 0
+}
+
+checkout_packages()
+{
+	# mount resources from other server
+	if [ -x /etc/cron.hourly/mount.sh ]; then
+		/etc/cron.hourly/mount.sh
+	fi
+
+	# without owndir, or get source code from CVS repos
+	# true in most cases
+    if [ x$owndir = x ] ; then
+		echo "${p}Checking out source code from CVS repos.${r}" | tolog
+		cvsdir=$workdir/$prj
+
+		# all packages
+		if [ -z "$pkgs" ] ; then
+			if [ "$_fullbuild" = "on" ]; then
+				echo -n "${p}Full rebuilding based on $ISOSNAP. ${r}" | tolog
+			    y_or_n y || return 1
+				exp=P
+		   		cd $workdir
+				mkdir -p $prj/
+				>$prj/VERMAP
+				if [ -n "$revision" ]; then
+					cvs co -r $revision $prj/$ISOSNAP || return 1 
+				else
+					cvs co $prj/$ISOSNAP || return 1 
+					revision=$(cvs st $prj/$ISOSNAP | grep "Repository revision" |awk '{print $3}')
+				fi
+				echo "${p}$ISOSNAP Revision: ${r}${e}$revision${r}"
+				echo ""
+				
+				for loop in `cat $prj/$ISOSNAP|grep -v "^#"|grep -v "^[[:space:]]*#" |grep src.rpm`; do
+#					eval `rpm -qp --qf "_pkg=%{NAME};pver=%{VERSION};" $pooldir/SRPMS/$loop`
+					eval `rpm -qp --qf "_pkg=%{NAME};pver=%{VERSION};" /vbuild/$prj/pool/SRPMS/$loop`
+					if [ $? '!=' 0 ] ; then
+						_pkg=`echo $loop |sed "s/-[[:digit:]].*//g"`
+						pver=`echo $loop |sed "s/^.*[[:alpha:]]-//g"|sed "s/^.*[[:alpha:]][[:digit:]]*-//g"|sed "s/.src.rpm$//g"|cut -d "-" -f1`
+					fi
+					# workaround here
+					case $_pkg in
+					  a2ps*|anthy*|automake*|autoconf*|\
+					  cdparanoia*|dmraid*|glitz-*|gtk+*|\
+					  libevent*|libjpeg*|libmad*|libnet10*|\
+					  libpci++*|libxf86config++*|memtest86+*|\
+					  libsigc++20*|libtheora*|llk_linux*|libid3tag|\
+					  libsynaptics*|man|nkf|ntp|openssh|openssl|\
+					  pccts|qq|qt|rarlinux|sbc-*|speex|sudo|\
+					  tkdnd|tzdata|Xaw3d)
+						_pkg=`echo $loop | cut -d- -f1`
+						pver=`echo $loop | cut -d- -f2`
+						;;
+					  alsa-driver*|baghira-sidebar*|\
+					  gnu-efi*|madwifi-kmod*|ntfs|\
+					  perl-SGMLSpm|\
+					  python-setuptools|uw-imap)
+						_pkg=`echo $loop | cut -d- -f1,2`
+						pver=`echo $loop | cut -d- -f3`
+						;;
+					  compat-gcc*|compat-ltdl*|\
+					  perl-Frontier-RPC|perl-HTML-Table|\
+					  perl-Math-BaseCnv|perl-XML-Merge|\
+					  perl-Smart-Comments*|\
+					  perl-XML-Grove|perl-XML-Tidy|\
+					  iwlwifi*|libertas-usb8388-firmware*)
+						_pkg=`echo $loop | cut -d- -f1,2,3`
+						pver=`echo $loop | cut -d- -f4`
+						;;
+					  # no source, no building.
+					  google-*|jre*|openoffice*)
+						_pkg=
+						pver=
+						continue
+						;;
+					  esac	
+					cvs co $prj/$_pkg/$pver || return 1
+					pkgs="$_pkg $pkgs"
+					echo "$_pkg:PB:$prj:$pver:i386:U" >>$prj/VERMAP
+				done
+				pkgs=`echo $pkgs|sed -e "s/ /\n/g"|sort -f|uniq|xargs`
+				pver=
+			else
+				echo "${p}Build all newest packages.${r}" | tolog
+				exp=P
+		   		(cd $workdir; cvs co $prj) || return 1
+		   		pkgs=`(cd $workdir/$prj; \
+				find . -maxdepth 1 -mindepth 1 -type d ! -name CVS | sort -f | uniq |\
+		    	sed 's@^\./@@'|sed -e "s/ /\n/g"|sort -f|uniq|xargs)`
+				# sort the packages
+				#pkgs=`echo $pkgs|sed -e "s/ /\n/g"|sort -f|uniq|xargs`
+				pver=""
+				_revision=""
+			fi
+		# specific package(s)
+		else
+			echo "${p}Build specific package(s).${r}" | tolog
+			exp=B
+			pkgs=`echo $pkgs|sed -e "s/ /\n/g"|uniq|xargs`
+			#echo "${s}* Checking out data from CVS ...${r}" | tolog
+		   	(cd $workdir; cvs co $prj/VERMAP) || return 1
+		   	for _pkg in $pkgs
+		   	do
+			# only one package
+			if [ "$_pkg" = "$pkgs" ]; then
+				# if _pkg has /,  split it. the firt on is real _pkg, the second is pver
+				_pkg_tmp=`echo $_pkg | cut -d"/" -f1`
+				if [ "$_pkg_tmp" != "$_pkg" ]; then
+					pver=`echo $_pkg | cut -d"/" -f2`
+					_pkg="$_pkg_tmp"
+				fi
+
+	#			(pver="" ;
+	#			cd $workdir; 
+	#			cvs co $prj/$_pkg;
+	#			specfile=
+	#			for loop in `ls $prj/$_pkg/*/*.spec`
+	#			do
+	#				specfile="$specfile `basename $loop`"
+	#			done
+	#			specfile=`echo $specfile|sed -e 's/ /\n/g'|grep ".spec"|sort|uniq`
+	#			cvs co $prj/$_pkg/*/$specfile) || return 1
+
+				# one specific version of the package
+				if [ -n "$pver" ]; then
+					cd $workdir
+					cvs co $prj/$_pkg/$pver || return 1
+					specfile=
+					echo $prj/$_pkg/$pver/ | tolog
+					for loop in `ls $prj/$_pkg/$pver/*.spec`
+					do
+						specfile="$specfile `basename $loop`"
+					done
+					#echo "specfile=$specfile"|tolog
+					specfile=`echo $specfile|sed -e 's/ /\n/g'|grep ".spec"|sort|uniq`
+					# echo "specfile=$specfile"|tolog
+					
+					# specific package version and revision
+					if [ -n "$revision" ]; then
+						_revision="$revision"
+					#	(cd $workdir; 
+					#	cvs co $prj/$_pkg/$pver;
+					#	specfile=
+					#	for loop in `ls $prj/$_pkg/$pver/*.spec`
+					#	do
+					#		specfile="$specfile `basename $loop`"
+					#	done
+					#	specfile=`echo $specfile|sed -e 's/ /\n/g'|grep ".spec"|sort|uniq`
+					#echo "specfile=$specfile"|tolog
+						rm -fv $prj/$_pkg/$pver/$specfile;
+						#rm -fv $prj/$_pkg/$pver/*.spec;
+						echo "${p}Get rev:${revision} $prj/$_pkg/$pver/$specfile${r}" | tolog 
+						(cd $workdir;cvs co -r $revision $prj/$_pkg/$pver/$specfile;cvs st $prj/$_pkg/$pver/$specfile | tolog) || return 1;
+						
+					# default revision, the newest/head revision in trunk
+					else
+						_revision=""
+					#	(cd $workdir; 
+					#	cvs co $prj/$_pkg;
+					#	specfile=
+					#	for loop in `ls $prj/$_pkg/$pver/*.spec`
+					#	do
+					#		specfile="$specfile `basename $loop`"
+					#	done
+					#	specfile=`echo $specfile|sed -e 's/ /\n/g'|grep ".spec"|sort|uniq`
+					#	) || return 1
+					fi	
+					cd - >/dev/null 2>&1
+
+				# all versions of the package, you can select one in the following steps
+				else 	# [ ! -n "$pver" ]
+					_revision=""
+					cd $workdir;
+
+					# if _pkg has /,  split it. the firt on is real _pkg, the second is pver
+					_pkg_tmp=`echo $_pkg | cut -d"/" -f1`
+					if [ "$_pkg_tmp" != "$_pkg" ]; then
+						_pkg="$_pkg_tmp"
+						pver=`echo $_pkg | cut -d"/" -f2`
+					fi
+
+					cvs co $prj/$_pkg || return 1
+					specfile=""
+				#	for loop in `ls $prj/$_pkg/*/*.spec`
+				#	do
+				#		specfile="$specfile `basename $loop`"
+				#	done
+				#	specfile=`echo $specfile|sed -e 's/ /\n/g'|grep ".spec"|sort|uniq`
+					cd - >/dev/null 2>&1
+				fi
+
+			# more than one packages
+			else
+				if [ -n "$pver" ]; then
+					echo -e "${w}Multiple packages found. Discard the following parameter(s):\n ${r}" | tolog
+					echo -e "${e}\t -v $pver${r}" | tolog
+					if [ -n "$_revision" ]; then
+						echo -e "${e}\t -r $_revision${r}" | tolog
+					fi
+					echo | tolog
+
+					pver=""
+					_revision=""
+				fi
+				(cd $workdir; cvs co $prj/$_pkg) || return 1
+			fi
+		    done
+		fi
+	# with owndir
+	# false in most cases
+    else	
+		echo "${p}Source code from own dir.${r}" | tolog
+		cvsdir=$owndir/$prj
+
+		if [ -z "$pver" -a ! -f $owndir/$prj/VERMAP ] ; then
+		    echo "${e}$owndir/$prj/VERMAP: No such file.${r}" | tolog
+		    return 1
+		fi
+		# all packages in owndir
+		if [ -z "$pkgs" ] ; then
+			if [ "$_fullbuild" = "on" ]; then
+				echo -n "${p}Full rebuilding based on $ISOSNAP. ${r}" | tolog
+			    y_or_n y || return 1
+				exp=P
+		   		cd $workdir
+				mkdir -p $prj/
+				>$prj/VERMAP
+				if [ -n "$revision" ]; then
+					cvs co -r $revision $prj/$ISOSNAP || return 1
+				else
+					cvs co $prj/$ISOSNAP || return 1
+					revision=$(cvs st $prj/$ISOSNAP | grep "Repository revision" |awk '{print $3}')
+                fi
+                echo "${p}$ISOSNAP Revision: ${r}${e}$revision${r}"
+                echo ""
+
+				for loop in `cat $prj/$ISOSNAP|grep -v "^#"|grep -v "^[[:space:]]*#" |grep src.rpm`; do
+#					eval `rpm -qp --qf "_pkg=%{NAME};pver=%{VERSION};" $pooldir/SRPMS/$loop`
+					eval `rpm -qp --qf "_pkg=%{NAME};pver=%{VERSION};" /vbuild/$prj/pool/SRPMS/$loop`
+                    if [ $? '!=' 0 ] ; then
+						_pkg=`echo $loop |sed "s/-[[:digit:]].*//g"`
+						pver=`echo $loop |sed "s/^.*[[:alpha:]]-//g"|sed "s/^.*[[:alpha:]][[:digit:]]*-//g"|sed "s/.src.rpm$//g"|cut -d "-" -f1`
+					fi
+					# workaround here
+					case $_pkg in
+					  a2ps*|anthy*|automake*|autoconf*|\
+					  cdparanoia*|dmraid*|glitz-*|gtk+*|\
+					  libevent*|libjpeg*|libmad*|libnet10*|\
+					  libpci++*|libxf86config++*|memtest86+*|\
+					  libsigc++20*|libtheora*|llk_linux*|libid3tag|\
+					  libsynaptics*|man|nkf|ntp|openssh|openssl|\
+					  pccts|qq|qt|rarlinux|sbc-*|speex|sudo|\
+					  tkdnd|tzdata|Xaw3d)
+						_pkg=`echo $loop | cut -d- -f1`
+						pver=`echo $loop | cut -d- -f2`
+						;;
+					  alsa-driver*|baghira-sidebar*|\
+					  gnu-efi*|madwifi-kmod*|ntfs|\
+					  perl-SGMLSpm|\
+					  python-setuptools|uw-imap)
+						_pkg=`echo $loop | cut -d- -f1,2`
+						pver=`echo $loop | cut -d- -f3`
+						;;
+					  compat-gcc*|compat-ltdl*|\
+					  perl-Frontier-RPC|perl-HTML-Table|\
+					  perl-Math-BaseCnv|perl-XML-Merge|\
+					  perl-Smart-Comments*|\
+					  perl-XML-Grove|perl-XML-Tidy|\
+					  iwlwifi*|libertas-usb8388-firmware*)
+						_pkg=`echo $loop | cut -d- -f1,2,3`
+						pver=`echo $loop | cut -d- -f4`
+						;;
+					  # no source, no building.
+					  google-*|jre*|openoffice*)
+						_pkg=
+						pver=
+						continue
+						;;
+					  esac	
+					cvs co $prj/$_pkg/$pver || return 1
+					pkgs="$_pkg $pkgs"
+					echo "$_pkg:PB:$prj:$pver:i386:U" >>$prj/VERMAP
+				done
+				pkgs=`echo $pkgs|sed -e "s/ /\n/g"|sort -f|uniq|xargs`
+				pver=
+			else
+				echo "${p}Build all newest packages.${r}" | tolog
+				exp=P
+	    		pkgs=`(cd $owndir/$prj; \
+				find . -maxdepth 1 -mindepth 1 -type d ! -name CVS | sort -f| uniq | \
+				sed 's@^\./@@'|sed -e "s/ /\n/g"|sort -f|uniq|xargs)`
+				# sort the packages
+				#pkgs=`echo $pkgs|sed -e "s/ /\n/g"|sort -f|uniq|xargs`
+				pver=""
+				_revision=""
+			fi
+		# specific package(s)
+		else
+			echo "${p}Build specific package(s).${r}" | tolog
+			exp=B
+			pkgs=`echo $pkgs|sed -e "s/ /\n/g"|uniq|xargs`
+	    		for _pkg in $pkgs
+	    		do
+				# whether pver is defined of not, the following judgement is always OK.
+				# comment by jzwang@redflag-linux.com
+				if [ ! -d $owndir/$prj/$_pkg/$pver ] ; then
+		    			echo "${e}$owndir/$prj/$_pkg/$pver: No such directory.${r}" | tolog
+		    			return 1
+				fi
+
+				# more than one package
+				#if [ "$_pkg" != "$pkgs" ]; then
+				#	pver=""
+				#	_revision=""
+				#fi
+
+				# one specific version of the package
+				if [ -n "$pver" ]; then
+					cd $workdir
+					cvs co $prj/$_pkg/$pver || return 1
+					specfile=
+					for loop in `ls $prj/$_pkg/$pver/*.spec`
+					do
+						specfile="$specfile `basename $loop`"
+					done
+					specfile=`echo $specfile|sed -e 's/ /\n/g'|grep ".spec"|sort|uniq`
+					# specific package version and revision
+					if [ -n "$revision" ]; then
+						_revision="$revision"
+					#	(cd $workdir; 
+					#	cvs co $prj/$_pkg/$pver;
+					#	specfile=
+					#	for loop in `ls $prj/$_pkg/$pver/*.spec`
+					#	do
+					#		specfile="$specfile `basename $loop`"
+					#	done
+					#	specfile=`echo $specfile|sed -e 's/ /\n/g'|grep ".spec"|sort|uniq`
+						#rm -f $prj/$_pkg/$pver/$specfile;
+						rm -fv $prj/$_pkg/$pver/*.spec;
+						echo "$revision $prj/$_pkg/$pver/$specfile" | tolog 
+						#(cd $workdir;cvs co -r $revision $prj/$_pkg/$pver/$specfile;cvs st $prj/$_pkg/$pver/$specfile|head -n3 | tolog) || return 1;
+						cvs co -r $revision $prj/$_pkg/$pver/$specfile || return 1
+						cvs st $prj/$_pkg/$pver/$specfile | head -n3 | tolog
+						
+					fi
+					cd - >/dev/null 2>&1
+				fi
+	    		done
+		fi	
+    fi
+
+	# if pver is null, _revision is null, too
+	[ -n "$pver" ] || _revision=""
+
+	echo "${r}" | tolog
+	all_pkgs_num=`echo $pkgs|wc -w`
+#	if [ "$all_pkgs_num" -gt 1 ]; then
+#			echo -e "${p}Discard the following parameter(s): \n${r}" | tolog
+#		if [ -n "$pver" ]; then
+#			echo -e "${p}\t -v $pver${r}" | tolog
+#			if [ -n "$_revision" ]; then
+#				echo -e "${p}\t -r $_revision${r}" | tolog
+#			fi
+#			pver=""
+#			_revision=""
+#		fi
+#	fi
+	echo -e "${p}Following $all_pkgs_num package(s) will be built: \n${w}$pkgs${r}" | tolog
+#	echo "" | tolog
+
+    return 0
+}
+
+display_information() {
+    echo | tolog
+    echo "${p}=========== bldpkg information ===========${r}" | tolog
+    echo "${p}DATE:${r}            $DATE" | tolog
+    echo "${p}PROJECT:${r}         ${e}$prj${r}" | tolog
+    echo "${p}VIRBUILD:${r}        $virdir" | tolog
+    echo "${p}DISTDIR:${r}         $distdir" | tolog
+    echo "${p}POOLDIR:${r}         $pooldir" | tolog
+    echo "${p}WORKDIR:${r}         $workdir" | tolog
+    echo -n "${p}MODE:${r}            " | tolog
+    echo -n "BUILD=${e}$bld${r}, " | tolog
+    echo -n "PRODUCT=${e}$prdct${r}, " | tolog
+    echo "INSTALL=${e}$_install${r}" | tolog
+    echo "${p}ARCH:${r}            ${e}$arch${r}" | tolog
+    echo "${p}RPM:${r}             ${e}$mkbin${r}" | tolog
+    echo "${p}SRPM:${r}            ${e}$mksrc${r}" | tolog
+    echo "${p}QUICK MODE:${r}      ${e}$quickmode${r}" | tolog
+#    echo "${p}INSTALL:${r}    ${e}$_install${r}" | tolog
+    echo "${p}FULL LOGFILE:${r}    $log" | tolog
+    echo "${p}PACKAGE(S) ($all_pkgs_num):${r}" | tolog
+    if [ -z "$pver" ] ; then
+	printf "	%s\n" $pkgs | tolog
+    echo "${p}VERSION:${r}         ${e}Default${r}" | tolog
+    else
+	printf "	%s\n" $pkgs | tolog
+    echo "${p}VERSION:${r}         ${e}$pver${r}" | tolog
+    fi
+    if [ -z "$_revision" ] ; then
+    echo "${p}REVISION:${r}        ${e}Default${r}" | tolog
+    else
+    echo "${p}REVISION:${r}        ${e}$_revision${r}" | tolog
+    fi
+
+    echo | tolog
+
+    y_or_n y || return 1
+
+    return 0
+}
+
+build_packages() {
+pkg_num=0
+for _pkg in $pkgs
+do
+	pkg_num=`expr $pkg_num + 1`
+	_srpm=
+	_rpms=
+	_conflict_dir=
+	_pkg_orig=
+
+	# if _pkg has /,  split it. the firt on is real _pkg, the second is pver
+	if echo $_pkg |grep -q "/"; then
+		_pkg_orig="$_pkg"
+		_pkg_tmp=`echo $_pkg | cut -d"/" -f1`
+		if [ "$_pkg_tmp" != "$_pkg" ]; then
+			pver=`echo $_pkg | cut -d"/" -f2`
+			_pkg="$_pkg_tmp"
+		else
+			pver=
+		fi
+	fi
+
+#	_pkg_bb_log=$virdir/var/tmp/log.$_pkg-${DATE}.bb
+#	_pkg_bs_log=$virdir/var/tmp/log.$_pkg-${DATE}.bs
+	/usr/sbin/chroot ${virdir} /sbin/ldconfig
+	echo | tolog
+	echo "${p}############################ $pkg_num / $all_pkgs_num ##########################${r}" | tolog
+	echo "${p}PACKAGE NAME:${r}       $_pkg" | tolog
+	if [ -z "$pver" ] ; then
+	    _ent=`grep "^$_pkg:.*[${exp}].*:$ver:" $cvsdir/VERMAP`
+#		echo "cvsdir is $cvsdir" | tolog
+	    if [ $? = 0 ] ; then
+			_cnt=`printf "%s\n" $_ent | wc -l`
+			_pver=`printf "%s\n" $_ent |cut -d ":" -f4 | xargs`
+#			echo "_pver is $_pver" | tolog
+			if [ $_cnt '!=' 1 ] ; then
+			    	echo "${w}Multiple entries in VERMAP:${r}" | tolog
+			    	printf "%s\n" $_ent | tolog
+				if [ "$yes" = "on" ]; then
+					echo "${s}${w}Using the latest version${r}" | tolog
+					_pver_max=`echo $_pver|wc -w`
+					#_pver=`echo $_pver| cut -d " " -f${_pver_max}`
+					_pver=`/usr/bin/compare_version $_pver`
+				else
+					_pversions=`echo $_pver|xargs`
+#					echo $_pversions | tolog
+					echo -n "${e}Please input one version of the package ${r}(${p}$_pversions${r}):" | tolog
+					read _pver
+					while :
+					do
+						opt=
+						for opt in $_pversions;
+						do
+							[ "$opt" = "$_pver" ] && break			
+						done
+						[ "$opt" = "$_pver" ] && break			
+						echo -n "${e}Please input the version of the package ${r}(${p}$_pversions${r}):" | tolog
+						read _pver
+					done
+				fi
+			fi
+			if [ -z "$_pver" ] ; then
+		    		echo "${e}VERMAP format error.${r}" | tolog
+		    		echo "$_ent" | tolog
+		    		_fail="$_fail $_pkg"
+		    		continue
+			fi
+	    else
+			echo "${w}No entry - skipped${r}" | tolog
+			#_fail="$_fail $_pkg"
+			continue
+	    fi
+	else
+	    _pver="$pver"
+	fi
+	
+	_pkg_bb_log=$virdir/var/tmp/log.$_pkg-$_pver-${DATE}.bb
+    _pkg_bs_log=$virdir/var/tmp/log.$_pkg-$_pver-${DATE}.bs
+
+#	echo $_ent | tolog
+#	printf "%s\n" $_ent | tolog
+#	echo ${_pver} | tolog
+	#[ `echo $_ent|grep -w ":${_pver}:"|cut -d":" -f6` = "I" ] && _pkg_install=on
+#	printf "%s\n" $_ent|grep ":${_pver}:" |cut -d":" -f6 | tolog
+#	[ `printf "%s\n" $_ent|grep ":${_pver}:"|cut -d":" -f6` = "I" ] && _pkg_install=on
+	_pkg_install=${_pkg_install:-$_install}
+#    echo "_pkg_install is $_pkg_install" | tolog
+	echo "${p}PACKAGE VERSION:${r}    $_pver" | tolog
+
+	_spec=`ls $cvsdir/$_pkg/$_pver/*.spec`	
+	if [ $? '!=' 0 ] ; then
+	    echo "${e}No such spec file.${r}" | tolog
+	    ls $cvsdir/$_pkg/$_pver >> $log 2>&1
+	    _fail="$_fail $_pkg"
+	    continue
+	fi
+	_cnt=`printf "%s\n" $_spec | wc -l`
+	if [ $_cnt '!=' 1 ] ; then
+	    echo "${e}Too many spec files.${r}" | tolog
+	    ls $cvsdir/$_pkg/$_pver >> $log 2>&1
+	    _fail="$_fail $_pkg"
+	    continue
+	fi
+	_specfn=`basename $_spec`
+	echo "${p}SPEC FILE:${r}          $_specfn" | tolog
+	if [ -n $_revision ]; then
+	echo "${p}SPEC REVISION:${r}      $_revision" | tolog
+	fi
+
+	cp $_spec $vworkdir/rpmbuild/SPECS 
+	if [ $? '!=' 0 ] ; then
+	    echo "${e}Failed to copy SPEC file.${r}" | tolog
+	    _fail="$_fail $_pkg"
+	    continue
+	fi
+
+	_st=0
+	for _dist in $distdir/$_pkg $distdir/$_pkg/$_pver
+	do
+	    _fs=`find $_dist -maxdepth 1 -mindepth 1 -type f`
+	    if [ ! -z "$_fs" ] ; then
+		echo "${p}SOURCE FILE(S) FROM $_dist:${r}" | tolog
+		for _f in $_fs
+		do
+		    echo "	`basename $_f`" | tolog
+		    cp -f $_f $vworkdir/rpmbuild/SOURCES
+		    if [ $? '!=' 0 ] ; then
+			_st=1
+			break
+		    fi
+		done
+	    fi
+	done
+
+	# replace the spec file, using the one from $distdir
+	ls $vworkdir/rpmbuild/SOURCES/*.spec >/dev/null 2>&1
+	if [ $? = 0 ]; then
+		_spec=`ls $vworkdir/rpmbuild/SOURCES/*.spec` >/dev/null 2>&1
+		_cnt=`ls $vworkdir/rpmbuild/SOURCES/*.spec | wc -l`
+		if [ $_cnt = 1 ] ; then
+			cp $_spec $vworkdir/rpmbuild/SPECS/*.spec
+			if [ $? '!=' 0 ] ; then
+				echo "${e}Failed to copy SPEC file.${r}" | tolog
+				_fail="$_fail $_pkg"
+				continue
+			fi
+		else
+			echo "${e}Too many spec files.${r}" | tolog
+			ls $cvsdir/$_pkg/$_pver >> $log 2>&1
+			_fail="$_fail $_pkg"
+			continue
+		fi
+	fi
+	if [ $_st '!=' 0 ] ; then
+	    reset_builddir
+	    _fail="$_fail $_pkg"
+	    continue
+	fi
+
+	if [ -f $cvsdir/$_pkg/$_pver/.axbldpkg.prep ] ; then
+	    (cd $cvsdir/$_pkg/$_pver; sh .axbldpkg.prep) >> $log 2>&1
+	    if [ $? '!=' 0 ] ; then
+		reset_builddir
+		_fail="$_fail $_pkg"
+		continue
+	    fi 
+	fi
+
+	_fs=`find $cvsdir/$_pkg/$_pver -maxdepth 1 -type f \
+	    ! -name '*.spec' -a ! -name TARMAP -print`
+	if [ ! -z "$_fs" ] ; then
+	    echo "${p}SOURCE FILE(S) FROM CVS:${r}" | tolog
+	    _st=0
+	    for _f in $_fs
+	    do
+		echo "	`echo $_f | sed 's@$cvsdir/@@'|xargs basename`" | tolog
+		cp -f $_f $vworkdir/rpmbuild/SOURCES
+		if [ $? '!=' 0 ] ; then
+		    echo "${e}Failed to copy files.{$r}" | tolog
+		    _st=1
+		fi
+	    done
+	    if [ $_st '!=' 0 ] ; then
+		reset_builddir
+		_fail="$_fail $_pkg"
+		continue
+	    fi
+	fi
+
+	if [ -f $cvsdir/$_pkg/$_pver/TARMAP ] ; then
+	    echo "${p}SOURCE FILE(S) FROM TARMAP:${r}" | tolog
+	    cat $cvsdir/$_pkg/$_pver/TARMAP | while read _l
+	    do
+		eval `echo $_l | awk -F: \
+		    '{print "_t1=\"" $1 "\";_t2=\"" $2 "\";_t3=\"" $3 "\";"}'`
+		_tardir=`echo $_t1`
+		_tarfn=`echo $_t2`
+		_tarsfx=`echo $_t3`
+		if [ ! -d $cvsdir/$_pkg/$_pver/$_tardir ] ; then
+		    echo "${e}$tardir does not exist."
+		    return 1
+		fi
+		tar cvfC $workdir/tmp.tar $cvsdir/$_pkg/$_pver/$_tardir . \
+		    --exclude CVS > /dev/null || return 1
+		_ent=`printf "%s\n" $cmplist | grep "^$_tarsfx:"`
+		if [ $? '!=' 0 ] ; then
+		    echo "${e}No such entry $_tarsfx.${r}"
+		    rm -f $workdir/tmp.tar
+		   preturn 1
+		fi
+		eval `echo $_ent | \
+		    awk -F: '{print "_sfx=" $2 ";_cmpcmd=" $3 ";"}'`
+		if [ $_cmpcmd '!=' '\-' ] ; then
+		    $_cmpcmd $workdir/tmp.tar || return 1
+		fi
+		echo "	${_tarfn}.$_tarsfx"
+		mv $workdir/tmp.tar.$_sfx \
+		    $vworkdir/rpmbuild/SOURCES/${_tarfn}.$_tarsfx || return 1
+	    done | tolog
+	    if [ $? '!=' 0 ] ; then
+		reset_builddir
+		_fail="$_fail $_pkg"
+		continue
+	    fi
+	fi
+
+	y_or_n y "Build it?"
+	if [ $? = 1 ] ; then
+	    reset_builddir
+	    _fail="$_fail $_pkg"
+	    continue
+	fi
+
+	# check free mem and disk space before run rpmbuild -bb
+	check_free_mem || return 1
+	check_free_diskspace || return 1
+	check_proc_sys
+
+	if [ $mksrc = on ] ; then
+	    echo | tolog
+ 	    if [ "$arch" = "Default" ]; then
+	    	echo "${s}* Executing rpmbuild -bs .${r}" | tolog
+	    	echo "${s}* Log file is $_pkg_bs_log ${r}" | tolog
+	    	if echo "$_pkg"|grep kmod >/dev/null 2>&1 ; then
+	    		/usr/sbin/chroot $virdir su - $prj_packager -c " $workdir/run_rpm bs $_specfn $_pkg $_pver --target=i686"
+				_error=$?
+			elif echo "$_pkg"|grep alsa-driver >/dev/null 2>&1 ; then
+	    		/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bs $_specfn $_pkg $_pver --target=i686"
+				_error=$?
+			elif echo "$_pkg"|grep xorg-x11-drv-nvidia >/dev/null 2>&1 ; then
+	    		/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bs $_specfn $_pkg $_pver --target=i686"
+				_error=$?
+	    	else	
+	    		/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bs $_specfn $_pkg $_pver"
+				_error=$?
+			fi
+	    else
+			echo "${s}* Executing rpmbuild -bs --target=$arch .${r}" | tolog
+			echo "${s}* Log file is $_pkg_bs_log ${r}" | tolog
+			/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bs $_specfn $_pkg $_pver --target=$arch"
+			_error=$?
+	    fi
+	    if [ "$_error" = 0 ] ; then
+			echo "${s}* Done.${r}" | tolog
+	    else
+			echo "${e}Error: Failed to create SRPM of $_pkg ${r}" | tolog
+			echo "${e}Please check $_pkg_bs_log ${r}" \
+		    | tolog
+			if [ $_st = 0 ] ; then
+		    	_fail="$_fail $_pkg"
+			fi
+			_st=1
+	    fi
+	fi
+
+	_srpm=
+	_rpms=
+#	if [ $_st = 0 ] ; then
+	if [ "$mksrc" = "on" ] ; then
+#	    echo | tolog
+	    _srpm=`find $vworkdir/rpmbuild/SRPMS -type f -name ${_pkg}"*".src.rpm`
+	    if [  $mksrc = on -a -z "$_srpm" ] ; then
+		echo "${e}No SRPM created.${r}" | tolog
+		echo "${e}Please check $_pkg_bs_log ${r}" \
+		    | tolog
+		_fail="$_fail $_pkg"
+		reset_builddir
+		continue
+	    fi
+	    echo "${p}CREATED SRPM:${r}" | tolog
+	    printf "	%s\n" `echo $_srpm | sed "s@$vworkdir/rpmbuild/@@g"` | tolog
+	fi
+
+	if [ "$mkbin" = on ] ; then
+	    echo | tolog
+	    st=0
+	    # make full build smoothly
+	    #/sbin/ldconfig
+	    /usr/sbin/chroot ${virdir} /sbin/ldconfig
+
+	    # build for Default architecture
+	    if [ "$arch" = "Default" ]; then
+		# glibc: i686, i586 and i386
+		if [ $_pkg = "glibc" ] ; then
+			echo "${s}* Executing rpmbuild -bb i686,i586,i386 .${r}" | tolog
+		   	echo "${s}* Log file is $_pkg_bb_log ${r}" | tolog
+			/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bb $_specfn $_pkg $_pver --target=i686,i586,i386"
+		# kernel: i686, i386 and noarch
+		elif [ $_pkg = "kernel" ] ; then
+		   	echo "${s}* Executing rpmbuild -bb i686, i386 and noarch .${r}" | tolog
+		   	echo "${s}* Log file is $_pkg_bb_log ${r}" | tolog
+		    	/usr/sbin/chroot $virdir $workdir/run_rpm bb $_specfn $_pkg $_pver --target=i686,i386,noarch
+	        	if [ $? = 0 ] ; then
+		    		echo "${s}* Done.${r}" | tolog
+	        	else
+		    		echo "${e}Failed to create RPM of $_pkg ${r}" | tolog
+		    		echo "${e}Please check $_pkg_bb_log${r}" | tolog
+		   		_fail="$_fail $_pkg"
+		    		_st=1
+	        	fi
+		# kmod-*: i686 only
+		elif echo "$_pkg"|grep kmod >/dev/null 2>&1 ; then
+		   	echo "${s}* Executing rpmbuild -bb i686 .${r}" | tolog
+		   	echo "${s}* Log file is $_pkg_bb_log ${r}" | tolog
+		    	#/usr/sbin/chroot $virdir $workdir/run_rpm bb $_specfn $_pkg $_pver --target=i686
+		    	/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bb $_specfn $_pkg $_pver --target=i686" | tolog
+	        	if [ $? = 0 ] ; then
+		    		echo "${s}* Done.${r}" | tolog
+	        	else
+		    		echo "${e}Failed to create RPM of $_pkg ${r}" | tolog
+		    		echo "${e}Please check $_pkg_bb_log${r}" | tolog
+		   		_fail="$_fail $_pkg"
+		    		_st=1
+	        	fi
+		# nvidia: i686 only
+		elif echo "$_pkg"|grep nvidia>/dev/null 2>&1 ; then
+		   	echo "${s}* Executing rpmbuild -bb i686 .${r}" | tolog
+		   	echo "${s}* Log file is $_pkg_bb_log ${r}" | tolog
+		    	#/usr/sbin/chroot $virdir $workdir/run_rpm bb $_specfn $_pkg $_pver --target=i686
+		    	/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bb $_specfn $_pkg $_pver --target=i686" | tolog
+	        	if [ $? = 0 ] ; then
+		    		echo "${s}* Done.${r}" | tolog
+	        	else
+		    		echo "${e}Failed to create RPM of $_pkg ${r}" | tolog
+		    		echo "${e}Please check $_pkg_bb_log${r}" | tolog
+		   		_fail="$_fail $_pkg"
+		    		_st=1
+	        	fi
+		elif echo "$_pkg"|grep "alsa-driver" >/dev/null 2>&1 ; then
+		   	echo "${s}* Executing rpmbuild -bb i686 .${r}" | tolog
+		   	echo "${s}* Log file is $_pkg_bb_log ${r}" | tolog
+		    	#/usr/sbin/chroot $virdir $workdir/run_rpm bb $_specfn $_pkg $_pver --target=i686
+		    	/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bb $_specfn $_pkg $_pver --target=i686" | tolog
+	        	if [ $? = 0 ] ; then
+		    		echo "${s}* Done.${r}" | tolog
+	        	else
+		    		echo "${e}Failed to create RPM of $_pkg ${r}" | tolog
+		    		echo "${e}Please check $_pkg_bb_log${r}" | tolog
+		   		_fail="$_fail $_pkg"
+		    		_st=1
+	        	fi
+		# others: default architecture, i386	
+	    	else
+			echo "${s}* Executing rpmbuild -bb.${r}" | tolog
+		   	echo "${s}* Log file is $_pkg_bb_log ${r}" | tolog
+			#/usr/sbin/chroot $virdir $workdir/run_rpm bb $_specfn $_pkg $_pver | tolog
+			/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bb $_specfn $_pkg $_pver" | tolog
+	        	if [ $? = 0 ] ; then
+		    		echo "${s}* Done.${r}" | tolog
+	        	else
+		    		echo "${e}Failed to create RPM of $_pkg ${r}" | tolog
+		    		echo "${e}Please check $_pkg_bb_log${r}" | tolog
+		   		_fail="$_fail $_pkg"
+		    		_st=1
+	        	fi
+	    	fi
+	    else
+	    	# build for specific architecture
+		echo "${s}* Executing rpmbuild -bb $arch .${r}" | tolog
+		echo "${s}* Log file is $_pkg_bb_log ${r}" | tolog
+		#/usr/sbin/chroot $virdir $workdir/run_rpm bb $_specfn $_pkg $_pver --target=$arch
+		/usr/sbin/chroot $virdir su - $prj_packager -c "$workdir/run_rpm bb $_specfn $_pkg $_pver --target=$arch"
+
+	    	if [ $? = 0 ] ; then
+			echo "${s}* Done.${r}" | tolog
+	    	else
+			echo "${e}Failed to create RPM of $_pkg ${r}" | tolog
+			echo "${e}Please check $_pkg_bb_log${r}" \
+			    | tolog
+			_fail="$_fail $_pkg"
+			_st=1
+		fi
+	    fi
+#	fi
+
+
+	_rpms=`find $vworkdir/rpmbuild/RPMS -type f -name '*.rpm'|sed -e "s/ /\n/g"|sort|xargs`
+#	if [ -n "$_rpms" ]; then
+	    echo "${p}CREATED RPM(S):${r}" | tolog
+	    if [ $mkbin = on -a -z "$_rpms" ] ; then
+			echo "${e}Error: Building $_pkg failed. No RPMS created.${r}" | tolog
+			echo "${e}Please check $_pkg_bb_log ${r}" \
+		    	| tolog
+			_fail="$_fail $_pkg"
+			reset_builddir
+			continue
+	    fi
+	    printf "	%s\n" `echo $_rpms | sed "s@$vworkdir/rpmbuild/@@g"` | tolog
+		# check missing file(s)
+		max_line=`cat $_pkg_bb_log|wc -l`
+		missing_files_msg_line=`grep -n "warning: Installed (but unpackaged) file(s) found:" $_pkg_bb_log|cut -d":" -f1|head -n 1`
+		wrote_msg_line=`grep -n "^Wrote:" $_pkg_bb_log|cut -d":" -f1|head -n 1`
+		if [ -n "$missing_files_msg_line" ]; then
+			let missing_files_msg_tail_line=$max_line-$missing_files_msg_line+1
+			let missing_files_msg_body_line=$wrote_msg_line-$missing_files_msg_line
+			echo ${w} | tolog
+			if [ -n "$missing_files_msg_body_line" ]; then
+				tail -n $missing_files_msg_tail_line $_pkg_bb_log|head -n $missing_files_msg_body_line | tolog
+			else
+				tail -n $missing_files_msg_tail_line $_pkg_bb_log | tolog
+			fi
+			echo ${r} | tolog
+			y_or_n y "Missing some files found, whether to continue?"
+			if [ $? = 1 ] ; then
+			    reset_builddir
+			    continue
+			fi
+			_warning="$_warning $_pkg"
+		fi
+
+		if grep "warning: File listed twice:" $_pkg_bb_log >/dev/null 2>&1 ; then
+			echo ${w} | tolog
+			grep "warning: File listed twice:" $_pkg_bb_log|tolog
+			echo ${r} | tolog
+			y_or_n y "File listed twice found, whether to continue?"
+			if [ $? = 1 ] ; then
+			    reset_builddir
+			    continue
+			fi
+			_warning="$_warning $_pkg"
+		fi
+		
+		echo | tolog
+
+		# Check whether a package conflicting with other packages which installed in virbuild
+		# always do it
+#		if [ "$quickmode" = "off" ]; then
+			echo "${s}* Checking confliction with other packages directories ...${r}" | tolog
+			# $rpminst_script = $virdir + /tmp/run_rpminst
+			/usr/sbin/chroot $virdir /tmp/run_rpminst $_pkg --test
+
+			if grep "is already installed" $_pkg_bb_log >/dev/null 2>&1 ; then
+				# same version
+				echo "The same version."
+			elif grep "conflicts with file from package" $_pkg_bb_log >/dev/null 2>&1 ; then
+				echo -n ${w} | tolog
+				grep "conflicts with file from package" $_pkg_bb_log|tolog
+				echo ${r} | tolog
+				y_or_n y "Conflicted file found, whether to continue?"
+				if [ $? = 1 ] ; then
+				    reset_builddir
+				    continue
+				fi
+				_warning="$_warning $_pkg"
+			else
+				echo -e "${p}\tPassed${r}" | tolog
+			fi
+#		fi
+
+		# Install the new package(s) into virbuild, just for testing or debuging
+		if [ "$_pkg_install" = "on" ]; then
+			echo "_pkg_install is $_pkg_install" | tolog
+			echo "${s}* Installing file into $virdir ...${r}" | tolog
+			# $rpminst_script = $virdir + /tmp/run_rpminst
+			/usr/sbin/chroot $virdir /tmp/run_rpminst $_pkg
+			if [ $? '!=' 0 ] ; then
+				echo "${e}Failed to install RPM.${r}" | tolog
+				_fail="$_fail $_pkg"
+				continue
+			fi
+		fi
+
+		# check file and directory confliction
+		echo "${s}* Checking confliction with system directories ...${r}" | tolog
+		for _r in $_rpms
+		do
+			_conflict_dir=
+
+			#echo | tolog
+			echo -ne "\t${p}`/bin/basename $_r`${r}" | tolog
+
+			if [ "$quickmode" = "off" ]; then
+				# Skip package: filesystem
+				[ "$_r" = "filesystem" ] && continue
+	
+				for _dir in $_sys_dir
+				do
+					rpm -qpl $_r|grep "^$_dir *$" >/dev/null 2>&1 && _conflict_dir="$_conflict_dir $_dir"
+				done
+				echo -e "${p}\t\tChecking passed${r}" | tolog
+			else
+				echo -e "${w}\t\tChecking skipped${r}" | tolog
+			fi
+
+			if [ -n "$_conflict_dir" ]; then
+				_conflict_pkg="$_conflict_pkg $_pkg"
+				echo | tolog
+				echo "${e}The following directories conflicted with system directory:${r}" | tolog
+				printf "${e}	%s${r}" $_conflict_dir | sort -u | tolog
+				echo ${r}| tolog
+				#y_or_n n "Continue to copy file(s)?"
+				y_or_n y "Accept the file?"
+				if [ $? = "1" ] ; then
+					rm -f $_r
+					reset_builddir
+	    			continue
+				fi
+			else
+				#y_or_n y "Copy the file?"
+				y_or_n y "Accept the file?"
+				if [ $? = "1" ] ; then
+					rm -f $_r
+					reset_builddir
+					continue
+				fi
+			fi
+                        #-----------------------------------------------------
+                        #Added by Jarod.W to copy bin rpm files into repo.
+	                if [ "$pushrepo" = "on" ] ; then
+                            rm $repodir/$_r
+                            cp $_r $repodir/ >> $log
+                            if [ $? '!=' 0 ] ; then
+				echo "${e}Failed to copy RPM ${_r} into repo.${r}" | tolog
+                            fi
+                        fi
+                        #-----------------------------------------------------
+			#echo "${s}* Copying binary RPM file(s)...${r}" | tolog
+			mv -v $_r $pooldir/RPMS >> $log
+			if [ $? '!=' 0 ] ; then
+				echo "${e}Failed to copy RPM.${r}" | tolog
+				reset_builddir
+				_fail="$_fail $_pkg"
+				continue
+			else
+				echo -e "\t${w}* Copied binary RPM file(s) into ${pooldir}/RPMS/${r}" | tolog
+			fi
+		done
+		#echo -e "\t${w}* Copied binary RPM file(s) into ${pooldir}/RPMS/${r}" | tolog
+
+	fi
+
+	echo | tolog
+
+	if [ -n "$_srpm" ] ; then
+		 _srpm_basename=`basename $_srpm`
+		# Copy Source RPM file
+		echo -e "\t${p}${_srpm_basename}${r}" | tolog
+		y_or_n y "Accept the file?"
+		if [ $? = "1" ] ; then
+			rm -f ${_srpm}
+			reset_builddir
+			continue
+		fi
+		mv -v $_srpm $pooldir/SRPMS/ 2>&1 >> $log
+		if [ $? '!=' 0 ] ; then
+			echo "${e}Failed to copy SRPM.${r}" | tolog
+			reset_builddir
+			_fail="$_fail $_pkg"
+			continue
+		else
+			echo -e "\t${w}* Copied source RPM file into ${pooldir}/SRPMS/${r}" | tolog
+		fi
+
+		# first building for new project
+		[ -f $RPMMAP ] || touch $RPMMAP
+
+		# Update RPMMAP
+		#if [ -n "$_srpm" -a -n "$_rpms" -a $_st = 0 -a `grep -c $_srpm_basename $RPMMAP` -eq 0 ] ; then
+
+		# if exist lock file, wait 1-5 seconds
+		let i=0
+		while [ $i -lt 5 -a -f ${RPMMAP}.lock ];
+		do((i++));
+			echo "Waiting for unlocking the $RPMMAP ... "	| tolog
+			sleep 1
+		done
+		if [ -f ${RPMMAP}.lock ]; then
+			echo "Time out to register in $RPMMAP"	| tolog
+			_fail="$_fail $_pkg"
+			continue
+		fi
+
+		# New Registering in RPMMAP
+		if [ -n "$_srpm" -a -n "$_rpms" -a $_st = 0 ] ; then
+			if [ `grep -c $_srpm_basename $RPMMAP` -eq 0 ] ; then
+				_rpms_num=`echo $_rpms|wc -l`
+				if [ "$_rpms_num" != 0 ]; then
+					touch ${RPMMAP}.lock
+					echo "${s}${p}* Registering $_srpm_basename in $RPMMAP ... ${r}" | tolog
+					echo -n "$_srpm_basename: " >> $RPMMAP
+					_rpms_list=
+					for loop in `echo $_rpms|sed -e "s/ /\n/g"|sort`;
+					do
+						_rpms_list="$_rpms_list `basename $loop`"
+					done
+					echo $_rpms_list|sort|xargs >> $RPMMAP
+					# remove the empty lines,
+					# remove the lines which has no ":",
+					# remove the lines which has two or more ":", 
+					# remove the lines which is nothing after ":".
+					cat $RPMMAP|grep -v "^[[:space:]]*$"|grep ":"|grep -v ":.*:"|grep -v ":[[:space:]]*$"|sort|uniq > /tmp/RPMMAP.$$
+					mv /tmp/RPMMAP.$$ $RPMMAP
+				fi
+				rm -f touch ${RPMMAP}.lock
+		    	echo "${s}* Done.${r}" | tolog
+		# Checking and Updating RPMMAP
+			else
+				_rpms_list_old=`grep $_srpm_basename $RPMMAP|cut -d: -f2-`
+				_rpms_list_new=
+
+				for loop in `echo $_rpms|sed -e "s/ /\n/g"|sort`;
+				do
+					echo "$_rpms_list_old" | grep -w -q `basename $loop` || _rpms_list_new="$_rpms_list_new `basename $loop`"
+				done
+
+				if [ -n "$_rpms_list_new" ]; then
+					_rpms_list="$_rpms_list_old $_rpms_list_new"
+				else
+					_rpms_list="$_rpms_list_old"
+				fi
+		# strip the spaces at the beginning and the ending of $_rpm_list
+				_rpms_list=`echo $_rpms_list|sed -e "s/^[[:space:]]*//g"|sed -e "s/[[:space:]]*$//g"` || return 1
+				if [ -n "$_rpms_list_new" ];then
+					echo "${s}${p}* Re-registering $_srpm_basename in $RPMMAP ... ${r}" | tolog
+					echo "${s}${p}* Adding $_rpms_list in $RPMMAP ... ${r}"
+					grep -v $_srpm_basename $RPMMAP > /tmp/RPMMAP.$$
+					echo "$_srpm_basename: $_rpms_list" >>/tmp/RPMMAP.$$
+					mv /tmp/RPMMAP.$$ $RPMMAP
+				fi
+	
+			fi
+		fi
+	fi
+
+	[ -n "$_pkg_orig" ] && pver=
+
+	reset_builddir
+done
+
+    # summary the warning and error message
+    if [ ! -z "$_warning" ] ; then
+		echo | tolog
+		echo "${s}${w}WARNING PACKAGE(S):${r}" | tolog
+		printf "	${w}%s\n${r}" $_warning | sort -uf | tolog
+		echo "${r}More info can be found in the log file: ${p}${log}${r}" | tolog
+    fi
+
+    if [ ! -z "$_conflict_pkg" ] ; then
+		echo | tolog
+		echo "${s}${w}CONFLICTING PACKAGE(S):${r}" | tolog
+		printf "	${w}%s\n${r}" $_conflict_pkg | sort -uf | tolog
+		echo "${r}Some directories in the package(s) conflict with package: ${p}filesystem${r}" | tolog
+    fi
+
+
+    if [ ! -z "$_fail" ] ; then
+		echo | tolog
+		_fail=`echo $_fail|sort|uniq`
+		echo "${s}${e}ERROR PACKAGE(S):" | tolog
+		printf "	%s\n" $_fail | sort -uf | tolog
+		echo ${r} | tolog
+		echo "More info can be found in the log file: ${p}${log}${r}" | tolog
+    fi
+
+    echo | tolog
+
+	if [ -n "$_fail" -o -n "$_conflict_pkg" ]; then
+		return 1
+	fi
+
+    return 0
+}
+
+# main function
+init_variables
+parse_args $* || error_exit
+check_dir $pooldir/SRPMS on || error_exit
+check_dir $pooldir/RPMS on || error_exit
+check_dir $workdir on || error_exit
+check_dir $vworkdir on || error_exit
+check_dir $vworkdir/rpmbuild on || error_exit
+check_dir $vworkdir/rpmbuild/SPECS on || error_exit
+check_dir $vworkdir/rpmbuild/SOURCES on || error_exit
+check_dir $vworkdir/rpmbuild/BUILD on || error_exit
+check_dir $vworkdir/rpmbuild/SRPMS on || error_exit
+check_dir $vworkdir/rpmbuild/RPMS on || error_exit
+check_dir $vworkdir/rpmbuild/RPMS/athlon on || error_exit
+check_dir $vworkdir/rpmbuild/RPMS/i386 on || error_exit
+check_dir $vworkdir/rpmbuild/RPMS/i486 on || error_exit
+check_dir $vworkdir/rpmbuild/RPMS/i586 on || error_exit
+check_dir $vworkdir/rpmbuild/RPMS/i686 on || error_exit
+check_dir $vworkdir/rpmbuild/RPMS/noarch on || error_exit
+trap "error_exit \"${E}SIGNAL recieved.${r}\"" SIGINT SIGTERM
+
+gen_rpmrc || error_exit
+checkout_packages || error_exit
+display_information || error_exit "${w}All procedure has been canceled.${r}"
+build_packages || error_exit
+cleanup_workdir
+create_repo
+showlog
+exit 0

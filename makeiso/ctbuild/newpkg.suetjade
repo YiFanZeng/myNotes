@@ -1,0 +1,21 @@
+#!/bin/bash
+
+user=`id -un`
+prj=SuetJade
+
+while [ "$1" != "${1##[-+]}" ]; do
+case $1 in
+  -j|-V)
+	# Just skip -j parameter
+	# prj(project name) can not be chaged
+	shift 2
+    ;;
+  *)
+	break
+	;;
+esac
+done
+
+sudo /usr/sbin/newpkg.prj -j $prj -u $user -p -y "$@"
+
+exit 0

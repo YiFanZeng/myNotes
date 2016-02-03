@@ -1,0 +1,99 @@
+/var/log/vdsm/*.log {
+    rotate 100				保存100个
+    missingok				忽略log丢失
+    size 15M                达到15M就压缩
+    compress				默认使用gzip压缩
+    compresscmd /usr/bin/xz			使用指定的压缩方式xz
+    uncompresscmd /usr/bin/unxz		使用指定的解压缩方式
+    compressext .xz					使用指定的扩展方式
+}
+/var/log/core/*.dump {
+    rotate 1
+    missingok
+    size 0
+    compress
+    compresscmd /usr/bin/xz
+    uncompresscmd /usr/bin/unxz
+    compressext .xz
+}
+
+[root@test logrotate.d]# cat libvirtd
+## beginning of configuration section by vdsm-4.13.0
+/var/log/libvirt/libvirtd.log {
+    rotate 100					保存100个
+    missingok					在压缩过程中，忽略所有错误
+    copytruncate				保证log数据不丢失
+    size 15M					日志文件达到15M才压缩
+    compress					默认使用gzip压缩
+    compresscmd /usr/bin/xz		使用指定的压缩方式xz
+    uncompresscmd /usr/bin/unxz	使用指定的解压方式unxz,默认的是gunzip
+    compressext .xz				使用指定的扩展方式在被压缩的日志文件。
+}
+
+[root@test logrotate.d]# cat ovirt-node 
+# Keep the previous three rotations, and rotate if it's been at least
+# a day *and* the filesize is at least minsize
+/var/log/ovirt*.log {
+    rotate 3
+    compress
+    missingok
+    minsize 1M					日志文件一定要超过1M才会压缩
+    daily						每天压缩一次
+    create						新建一个日志
+	size 432					如果日志的生成速度大于432k,启动轮询
+}
+
+[root@test logrotate.d]# cat libvirtd.qemu 
+/var/log/libvirt/qemu/*.log {
+        weekly
+        missingok
+        rotate 4
+        compress
+        delaycompress			延缓压缩前面的日志文件在下一次轮询
+        copytruncate
+        minsize 100k
+}
+
+[root@test logrotate.d]# cat vdsm-reg 
+/var/log/vdsm-reg/vds_bootstrap*.log {
+    rotate 0
+    missingok
+    maxage 30					删除超过30天的日志
+}
+
+/var/log/vdsm-reg/vdsm-reg.log {
+    copytruncate
+    rotate 3
+    missingok
+    size 10M
+    compress
+    compresscmd /usr/bin/xz
+    uncompresscmd /usr/bin/unxz
+    compressext .xz
+}
+
+"/var/log/ovirt-engine/engine.log" "/var/log/ovirt-engine/server.log" {
+        daily
+        minsize 10M
+        missingok
+        copytruncate
+        rotate 20
+        compress
+}
+
+"/var/log/ovirt-engine/host-deploy"/*.log {
+        monthly
+        missingok
+        compress
+        nocreate
+        rotate 1
+}
+
+"/var/log/ovirt-engine/dump"/*.hprof {
+        daily
+        missingok
+        compress
+        nocreate					不建立新的日志文件
+        rotate 1
+}
+

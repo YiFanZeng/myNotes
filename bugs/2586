@@ -1,0 +1,103 @@
+comments1:
+* 没有复现成功，但是从复现过程中，可以解释该现象。
+* 代码逻辑：创建模板和导出模板都是调用copyImage接口，底层调用的都是qemu-image convert命令。而convert命令会因为磁盘设备不同(文件/块设备)和image文件不同生成大小不等的image.先看一组数据
+  * 将qcow2转换成raw格式:(11G->9.3G)
+{{{
+[root@localhost media]# qemu-img info node1.qcow2 
+image: node1.qcow2
+file format: qcow2
+virtual size: 20G (21474836480 bytes)
+disk size: 11G
+cluster_size: 65536
+Format specific information:
+    compat: 0.10
+    refcount bits: 16
+[root@localhost media]# qemu-img convert -f qcow2 node1.qcow2 -O raw node1to.raw
+[root@localhost media]# qemu-img info node1to.raw 
+image: node1to.raw
+file format: raw
+virtual size: 20G (21474836480 bytes)
+disk size: 9.3G
+}}}
+  * 再把raw格式转换成qcow2:(556M->241M)
+{{{
+[root@localhost media]# qemu-img info test.raw 
+image: test.raw
+file format: raw
+virtual size: 10G (10737418240 bytes)
+disk size: 556M
+[root@localhost media]# qemu-img convert -f raw test.raw -O qcow2 testto.qcow2
+[root@localhost media]# qemu-img info testto.qcow2 
+image: testto.qcow2
+file format: qcow2
+virtual size: 10G (10737418240 bytes)
+disk size: 241M
+cluster_size: 65536
+Format specific information:
+    compat: 1.1
+    lazy refcounts: false
+    refcount bits: 16
+    corrupt: false
+}}}
+  * 把raw格式通过convert命令（556M->229M）
+{{{
+[root@localhost media]# qemu-img convert -f raw test.raw -O raw testto.raw
+[root@localhost media]# qemu-img info testto.raw 
+image: testto.raw
+file format: raw
+virtual size: 10G (10737418240 bytes)
+disk size: 229M
+}}}
+* 复现过程及分析如下：
+  * make template
+{{{
+Thread-550669::DEBUG::2015-11-18 11:29:31,673::__init__::481::jsonrpc.JsonRpcServer::(_serveRequest) Calling 'Volume.copy' in bridge with {u'preallocate': 2, u'volFormat': 5, u'volType': 6, u'dstImgUUID': u'47ed88b0-57dc-4e58-ad28-c1671d64cd1f', u'dstVolUUID': u'd9635aed-c046-4a41-80c9-2175aea537cd', u'dstSdUUID': u'8b71cb3a-a16c-4dc5-a293-478aa78a32bd', u'volumeID': u'3c9018c5-167e-46bb-92e7-1addd3615baf', u'imageID': u'207af928-d14d-441e-a9eb-de01c136e19e', u'postZero': u'false', u'storagepoolID': u'bad1c4c0-6b48-4b14-9077-f917ada04b63', u'storagedomainID': u'8b71cb3a-a16c-4dc5-a293-478aa78a32bd', u'force': u'false', u'desc': u'Active VM'}
+
+dest(模板)
+[root@ctvn103 ~]# qemu-img info /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/47ed88b0-57dc-4e58-ad28-c1671d64cd1f/d9635aed-c046-4a41-80c9-2175aea537cd
+image: /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/47ed88b0-57dc-4e58-ad28-c1671d64cd1f/d9635aed-c046-4a41-80c9-2175aea537cd
+file format: raw
+virtual size: 20G (21474836480 bytes)
+disk size: 8.7G
+[root@ctvn103 ~]# ll -h /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/47ed88b0-57dc-4e58-ad28-c1671d64cd1f/
+total 8.7G
+-rw-rw----. 1 vdsm kvm  20G Nov 18 11:34 d9635aed-c046-4a41-80c9-2175aea537cd
+-rw-rw----. 1 vdsm kvm 1.0M Nov 18 11:29 d9635aed-c046-4a41-80c9-2175aea537cd.lease
+-rw-r--r--. 1 vdsm kvm  270 Nov 18 11:34 d9635aed-c046-4a41-80c9-2175aea537cd.meta
+
+sour（虚拟机）
+[root@ctvn103 ~]# qemu-img info /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/207af928-d14d-441e-a9eb-de01c136e19e/3c9018c5-167e-46bb-92e7-1addd3615baf
+image: /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/207af928-d14d-441e-a9eb-de01c136e19e/3c9018c5-167e-46bb-92e7-1addd3615baf
+file format: raw
+virtual size: 20G (21474836480 bytes)
+disk size: 8.9G
+[root@ctvn103 ~]# ll -h /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/207af928-d14d-441e-a9eb-de01c136e19e/
+total 8.9G
+-rw-rw----. 1 vdsm kvm  20G Nov 11 10:34 3c9018c5-167e-46bb-92e7-1addd3615baf
+-rw-rw----. 1 vdsm kvm 1.0M Nov 10 14:47 3c9018c5-167e-46bb-92e7-1addd3615baf.lease
+-rw-r--r--. 1 vdsm kvm  307 Nov 10 14:47 3c9018c5-167e-46bb-92e7-1addd3615baf.meta
+
+d55ca534-573a-4d61-9025-f40a926a60e8::INFO::2015-11-18 11:29:32,638::image::706::Storage.Image::(copyCollapsed) copy source 8b71cb3a-a16c-4dc5-a293-478aa78a32bd:207af928-d14d-441e-a9eb-de01c136e19e:3c9018c5-167e-46bb-92e7-1addd3615baf vol size 41943040 destination 8b71cb3a-a16c-4dc5-a293-478aa78a32bd:47ed88b0-57dc-4e58-ad28-c1671d64cd1f:d9635aed-c046-4a41-80c9-2175aea537cd apparentsize 41943040
+376:d55ca534-573a-4d61-9025-f40a926a60e8::DEBUG::2015-11-18 11:29:34,357::utils::763::root::(execCmd) /usr/bin/nice -n 19 /usr/bin/ionice -c 3 /usr/bin/qemu-img convert -t none -T none -f raw /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/207af928-d14d-441e-a9eb-de01c136e19e/3c9018c5-167e-46bb-92e7-1addd3615baf -O raw /rhev/data-center/mnt/glusterSD/172.16.0.153:RE/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/47ed88b0-57dc-4e58-ad28-c1671d64cd1f/d9635aed-c046-4a41-80c9-2175aea537cd (cwd None)
+}}}
+  * export template
+{{{
+Thread-551332::DEBUG::2015-11-18 11:40:22,318::__init__::481::jsonrpc.JsonRpcServer::(_serveRequest) Calling 'Volume.copy' in bridge with {u'preallocate': 2, u'volFormat': 5, u'volType': 6, u'dstImgUUID': u'47ed88b0-57dc-4e58-ad28-c1671d64cd1f', u'dstVolUUID': u'd9635aed-c046-4a41-80c9-2175aea537cd', u'dstSdUUID': u'4118ac19-2093-4c84-bb81-3011a793b64e', u'volumeID': u'd9635aed-c046-4a41-80c9-2175aea537cd', u'imageID': u'47ed88b0-57dc-4e58-ad28-c1671d64cd1f', u'postZero': u'false', u'storagepoolID': u'bad1c4c0-6b48-4b14-9077-f917ada04b63', u'storagedomainID': u'8b71cb3a-a16c-4dc5-a293-478aa78a32bd', u'force': u'false', u'desc': u''}
+
+dest(导出域)
+[root@ctvn103 ~]# ll -h /rhev/data-center/mnt/172.16.0.240\:_sy_export/4118ac19-2093-4c84-bb81-3011a793b64e/images/47ed88b0-57dc-4e58-ad28-c1671d64cd1f/
+total 8.7G
+-r--r-----. 1 vdsm kvm 20G Nov 18 11:47 d9635aed-c046-4a41-80c9-2175aea537cd
+-rw-r--r--. 1 vdsm kvm 261 Nov 18 11:47 d9635aed-c046-4a41-80c9-2175aea537cd.meta
+
+sour(模板)
+[root@ctvn103 ~]# ll -h /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/47ed88b0-57dc-4e58-ad28-c1671d64cd1f/
+total 8.7G
+-rw-rw----. 1 vdsm kvm  20G Nov 18 11:34 d9635aed-c046-4a41-80c9-2175aea537cd
+-rw-rw----. 1 vdsm kvm 1.0M Nov 18 11:29 d9635aed-c046-4a41-80c9-2175aea537cd.lease
+-rw-r--r--. 1 vdsm kvm  270 Nov 18 11:34 d9635aed-c046-4a41-80c9-2175aea537cd.meta
+
+368:a9f13363-f396-49dc-a7b3-02e5a5fc53f0::DEBUG::2015-11-18 11:40:25,068::utils::763::root::(execCmd) /usr/bin/nice -n 19 /usr/bin/ionice -c 3 /usr/bin/qemu-img convert -t none -T none -f raw /rhev/data-center/bad1c4c0-6b48-4b14-9077-f917ada04b63/8b71cb3a-a16c-4dc5-a293-478aa78a32bd/images/47ed88b0-57dc-4e58-ad28-c1671d64cd1f/d9635aed-c046-4a41-80c9-2175aea537cd -O raw /rhev/data-center/mnt/172.16.0.240:_sy_export/4118ac19-2093-4c84-bb81-3011a793b64e/images/47ed88b0-57dc-4e58-ad28-c1671d64cd1f/d9635aed-c046-4a41-80c9-2175aea537cd (cwd None)
+}}}
+
+

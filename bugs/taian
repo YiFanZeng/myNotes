@@ -1,0 +1,19 @@
+in node07/vdsm
+[root@yifan vdsm]# grep -nr ERROR vdsm.log* | grep -v hosted-engine
+
+1. libvirterror, metadata not found
+vdsm.log.7:88270:Thread-95974::ERROR::2015-11-17 15:27:09,748::sampling::489::vm.Vm::(collect) vmId=`af0c8304-eaa1-48b0-aee6-e410ca598a24`::Stats function failed: <AdvancedStatsFunction _highWrite at 0x1ab3a08>
+vdsm.log.15:102789:Thread-33346::ERROR::2015-11-16 15:59:29,201::sampling::489::vm.Vm::(collect) vmId=`5d747606-5099-40f1-af11-5d1741abb7bf`::Stats function failed: <AdvancedStatsFunction _highWrite at 0x1ab3a08>
+2. connection timed out
+vdsm.log.25:50737:Thread-1296::ERROR::2015-11-14 16:13:40,373::domainMonitor::256::Storage.DomainMonitorThread::(_monitorDomain) Error while collecting domain 4b2ec421-1d08-493d-896c-7c2740171196 monitoring information
+
+
+in node06/vdsm
+
+1. libvirterror, metadata not found
+[root@yifan vdsm]# grep -nr ERROR vdsm.log* --color | grep -v hosted-engine | grep -v StorageDomainCache
+vdsm.log:32731:Thread-127616::ERROR::2015-11-18 08:56:20,884::utils::1218::utils.Callback::(__call__) acpiCallback failed
+vdsm.log:47683:Thread-126978::ERROR::2015-11-18 09:20:57,344::sampling::489::vm.Vm::(collect) vmId=`41fa7ddf-497a-4e0c-82a4-83b98efe83b7`::Stats function failed: <AdvancedStatsFunction _highWrite at 0x2fc89d0>
+vdsm.log:68830:Thread-69322::ERROR::2015-11-18 09:57:26,586::sampling::489::vm.Vm::(collect) vmId=`03e34a1c-4bff-4fcd-b491-0a4f3ee666a1`::Stats function failed: <AdvancedStatsFunction _highWrite at 0x2fc89d0>
+2.guestagent
+vdsm.log.22:7298:VM Channels Listener::ERROR::2015-11-15 17:12:13,675::guestagent::422::vm.Vm::(_processMessage) vmId=`4d56fbdf-8e16-4fdc-b3a4-1a45d6d2bff8`::Extra data: line 1 column 2 - line 1 column 1391 (char 2 - 1391): '65\\u6cd5 7.1\\u6b63\\u5f0f\\u7248", "Adobe Flash Player 19 ActiveX", "Microsoft Visual C++ 2010  x64 Redistributable - 10.0.40219", "Microsoft Office Professional Edition 2003", "Microsoft Office Proof (Chinese (Simplified)) 2007", "Microsoft Office Publisher MUI (Chinese (Simplified)) 2007", "Microsoft Office PowerPoint MUI (Chinese (Simplified)) 2007", "\\u817e\\u8bafQQ", "Microsoft Office Outlook MUI (Chinese (Simplified)) 2007", "Microsoft Visual C++ 2010  x86 Redistributable - 10.0.40219", "Microsoft Office Professional Plus 2007", "Microsoft Office Shared MUI (Chinese (Simplified)) 2007", "Microsoft Office Office 64-bit Components 2007", "360\\u6740\\u6bd2", "Microsoft Office Word MUI (Chinese (Simplified)) 2007", "Microsoft Office Proofing (Chinese (Simplified)) 2007", "360\\u5b89\\u5168\\u536b\\u58eb", "K-Lite Codec Pack 10.6.0 Full", "Microsoft Office Shared 64-bit MUI (Chinese (Simplified)) 2007", "CTVM_Tools 3.5.0.10", "Microsoft Office Proof (English) 2007", "Update for Microsoft Office Outlook 2007 (KB952142)", "Microsoft Office Excel MUI (Chinese (Simplified)) 2007", "\\u4e91\\u7aef\\u64ad\\u653e\\u5668 V4.3.4.0", "Microsoft Office InfoPath MUI (Chinese (Simplified)) 2007", "Microsoft Office Access MUI (Chinese (Simplified)) 2007", "Microsoft Office IME (Chinese (Simplified)) 2007", "WinRAR 4.20 (64 \\u4f4d)", "\\u798f\\u6615\\u9605\\u8bfb\\u5668"], "__name__": "applications"}'

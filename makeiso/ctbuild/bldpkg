@@ -1,0 +1,7 @@
+#!/bin/bash
+
+program="/usr/sbin/bldpkg.functions"
+
+sudo $program $@
+
+exit 0

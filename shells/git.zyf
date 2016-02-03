@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# save rpms of previous
+#sudo mkdir -p zengyf/build-rpms/$(date +%Y%m%d%H%M%S)
+#sudo cp -r rpmbuild/RPMS/ zengyf/build-rpms/$(date +%Y%m%d%H%M%S)
+echo "move rpms complete..."
+
+#clean cache
+sudo rm -rf rpmbuild/BUILD/
+sudo rm -rf rpmbuild/BUILDROOT/
+
+if [ $1 = vdsm ]; then
+    sudo rm -rf vdsm
+    echo "git clone git://192.168.0.200/vdsm -b ct3.0"
+    git clone git://192.168.0.200/vdsm -b ct3.0
+else
+    sudo rm -rf ovirt-node
+    sudo rm -rf ovirt-cache
+    echo "git clone git://192.168.0.200/ovirt-node -b cerf"
+    git clone git://192.168.0.200/ovirt-node -b cerf
+fi
+echo "git complete..."

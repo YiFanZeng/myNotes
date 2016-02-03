@@ -1,0 +1,76 @@
+1. guest tools和 device
+  * tools是为和qemu交互，device是一个设备
+  * tools有2种，分为ovirt版本和qemu版本，现在使用的是ovirt版本，基于qemu修改而来
+  * tools原理：vm发送到com端口，qemu或者其他从com取出。逆向操作未可知。
+
+2. autotest
+  * doc
+
+3. rlogin
+
+4. qemu命令
+[root@pc ~]# /usr/libexec/qemu-kvm -device i6300esb,?
+
+5. 数据库操作
+sudo su - postgres
+psql
+
+\?：查看psql命令列表。
+\l：列出所有数据库。
+\c [database_name]：连接其他数据库。 
+\d：列出当前数据库的所有表格。 
+\d [table_name]：列出某一张表格的结构。
+
+engine=# select vm_name from vm_static ;
+engine=# select * from vm_static where vm_name = '1872' ;
+engine=# select custom_serial_number from vm_static where vm_name = '1872' ;
+
+6. S/N
+wmic
+csproduct list full
+[root@pc ovirt-engine]# dmidecode  -t 3
+
+7. selinux
+[root@pc ~]# getenforce
+Enforcing
+[root@pc ~]# /usr/sbin/sestatus -v
+SELinux status:                 enabled
+SELinuxfs mount:                /selinux
+Current mode:                   enforcing
+Mode from config file:          enforcing
+
+8. 定时任务
+*/1 * * * * root /etc/init.d/libvirtd start
+*/1 * * * * root rm -rf /var/log/core/* 
+此处理方式不好，当需要调试，stop libvirtd是会导致libvirtd不断拉起。
+
+9. 启动win7
+/usr/libexec/qemu-kvm -name windows7 -cpu Westmere,+vmx -enable-kvm -m 8296 -smp 4,maxcpus=8,sockets=4,cores=2,threads=2 -spice port=3900,disable-ticketing -vga qxl -net nic,vlan=0,macaddr=2c:07:00:00:00:00,model=rtl8139 -net tap,vlan=0,ifname=tap100 -device virtio-serial-pci -device virtserialport,chardev=spicechannel0,name=com.redhat.spice.0 -chardev spicevmc,id=spicechannel0,name=vdagent  /home/zengyf/windwos7.qcow2 &
+
+10. git am冲突
+git am patch
+把patch中有冲突的部分删除
+再次git am patch
+修改冲突的文件
+git add 修改完的文件
+git commit --amend
+git push
+注意：
+[zyf@localhost vdsm]$ git am ../\[V2\ PATCH\]\[vdsm\]\ ManagedStats_\ Redesign\ setVdsManagedStats\(\)\ function\ to\ make\ it\ works..eml 
+previous rebase directory /home/zyf/vdsm/.git/rebase-apply still exists but mbox given.
+[zyf@localhost vdsm]$ git am --abort
+[zyf@localhost vdsm]$ git am ../\[V2\ PATCH\]\[vdsm\]\ ManagedStats_\ Redesign\ setVdsManagedStats\(\)\ function\ to\ make\ it\ works..eml 
+Applying: ManagedStats: Redesign setVdsManagedStats() function to make it works.
+
+11. git revert commit号 删除patch
+
+12. start vm with comand
+CTVM（mini+3.5.1 alpha）
+qemu-system-x86_64 -m 2048 -smp 4 -enable-kvm -localtime -net nic,vlan=0,macaddr=2c:07:00:00:00:88,model=rtl8139 -net tap,vlan=0,ifname=tap188 /home/tt/vms/ctvm.qcow2 -boot d &
+
+CTVN
+qemu-system-x86_64 -m 1024 -smp 4 -enable-kvm -localtime -net nic,vlan=0,macaddr=2c:07:00:00:00:66,model=rtl8139 -net tap,vlan=0,ifname=tap166 /home/tt/vms/node.qcow2 -boot d &
+
+13. Manager启动并管理SPM的选择过程
+首先Manager会要求vdsm确认哪个主机获取了锁
+主机是否能作为SPM由3个方面决定：getSPMstatus命令，返回3个状态之一：“SPM”， “Contending”, "Free"; 存储域的元数据中包括了最后一个具有SPM身份的主机信息； 和具有SPM身份的主机版本信息。

@@ -1,0 +1,822 @@
+#!/bin/bash
+#
+# Copyright MIRACLE LINUX CORPORATION all rights reserved. 
+#
+# $Id: $
+#
+LANG=en_US
+LC_ALL=en_US
+export LANG LC_ALL
+PRODUCT_VENDOR="CloudTimes"
+PRODUCT_PACKAGER="bugadmin\@cloudtimes.com"
+DATE=`date +%Y%m%d%H%M`
+
+prog=`basename $0`
+
+# Default Product
+jver="newCerf"
+
+log=/vbuild/tmp/newpkg-$jver-$DATE.$$.log
+
+ASIANUX_CURRENT_BUILD_HOST=nodebuild.cloudtimes.com
+CVSROOT=/home/cvsroot/CVS/
+umask 022
+
+_fails=
+_warnings=
+_pkgs=
+_buildnow=on
+
+
+init_variables()
+{
+#project_name=`basename $0|sed -e "s/^newpkg_admin.//g"`
+#echo $project_name
+	_user=`id -un`
+    if [ "${_user}" = "root" ] ; then
+	echo "do not run this script as 'root'." | tee -a ${log}
+	return 1
+    fi
+
+    cvsroot=${CVSROOT:-/home/cvsroot/CVS}
+#    echo $cvsroot
+    distdir="/vbuild/distfiles/${jver}"
+    ver=on
+    mark=
+    #arch=ALL
+    arch=x86_64
+	user="$_user"
+    yes=off
+    cpopt=-if
+    workdir=/vbuild/var/tmp/newpkg.$$
+    srpms=
+    force=off
+	INSTALL=off
+	GROUP=cvs
+
+    export CVSROOT=$cvsroot
+
+    if [ "${TERM}" = xterm -o "${TERM}" = kterm ] ; then
+	E='[5m[31m'
+	p='[34m'
+	e='[31m'
+	w='[33m'
+	s='[5m'
+	r='[0m'
+    else
+	E=
+	p=
+	e=
+	s=
+	r=
+    fi
+
+    return 0
+}
+
+cleanup_workdir()
+{
+    if [ -d $workdir ] ; then
+	echo "${s}* Removing working directory ...${r}" | tee -a ${log}
+	rm -rf $workdir
+	echo "${s}* All Done.${r}" | tee -a ${log}
+    fi
+
+    return 0
+}
+
+error_exit()
+{
+    _msg=${1:-'***** Error *****.'}
+    cleanup_workdir
+
+    echo "${E}$_msg${r}"  | tee -a ${log}
+
+    exit 1
+}
+
+y_or_n()
+{
+    [ $yes = on ] && return 0
+
+    _dflt=${1:-n}
+    _msg=${2:-'OK?'}
+
+    echo
+    while :
+    do
+	echo -n "$_msg (y/n) [$_dflt]: " | tee -a ${log}
+	read _ans;
+	case ${_ans:-$_dflt} in
+	  [Yy])
+	    _ret=0
+	    break
+	    ;;
+	  [Nn])
+	    echo 'Canceled.' | tee -a ${log}
+	    _ret=1
+	    break
+	    ;;
+	  *)
+	    echo 'Please answer y or n.' | tee -a ${log}
+	    sleep 1
+	    continue
+	    ;;
+	esac
+    done
+
+    return $_ret
+}
+
+parse_args()
+{
+    _bflg=off
+    _pflg=off
+    _cflg=off
+
+    while getopts d:bpcBa:fj:V:u:yh opt
+    do
+	case $opt in
+	  d)
+	    distdir=$OPTARG
+	    ;;
+	  b)
+	    _bflg=on
+	    _mark="${mark}B"
+	    #mark="B"
+	    ;;
+	  p)
+	    _pflg=on
+	    _mark="${mark}P"
+	    #mark="PB"
+	    ;;
+	  c)
+	    _cflg=on
+	    _mark="${mark}C"
+	    #mark="C"
+	    ;;
+	#  I)
+	#    INSTALL=on
+#		_mark="${mark}I"
+#	    ;;
+	  B)
+	    _buildnow=on
+	    ;;
+	  a)
+	    arch=ALL
+	    ;;
+	  f)
+	    force=on
+	    ;;
+	  j|V)
+	    jver=$OPTARG
+	    distdir="/vbuild/distfiles/${jver}"
+	    ;;
+	  u)
+		user=$OPTARG
+		;;
+#	  V)
+#	    ver=on
+#	    ;;
+	  y)
+	    yes=on
+	    cpopt=-av
+	    ;;
+	  *)
+	    echo "Usage: $prog [-d distdir][-b][-p][-B][-a arch][-j project_code_name][-f][-y][-h] /path/SRPM(S)" | tee -a ${log}
+	    echo "-d:	distfiles directory, the default value is /vbuild/distfiles/$jver"
+	    echo "-b:	Build flag. This flag will enable building the package one by one."
+	    echo "-p:	Product flag. This flag will enable building the package in a full building. It includes -b option."
+	    echo "-B:	Build the new package(s) now. The default value is off."
+	    echo "-a:	architecturei type, such as i386, i686 and so on."
+	    echo "-j:	project code name, such as Apatite, Sylph and so on."
+	    echo "-V:	same with -j."
+	    echo "-f:	force/overwite mode. This option is NOT recommended."
+	    echo "-y:	aswer all questions with YES. The default value is false."
+	    echo "-h:	show this help message."
+	    echo "DEFAULT: $prog -B -b -j $jver /path/name*src.rpm"
+	    exit 1
+	esac
+    done
+
+	case $_mark in
+	  *P*)
+		mark="PB"
+		;;
+	  *B*)
+		mark="${mark}B"
+		;;
+	esac
+
+	case "$jver" in
+	  ApatiteNE|dt50ne|dt51)
+		PRODUCT_CURRENT_VERSION="Desktop 5.0 NE"
+		PRODUCT_CURRENT_PROJECT="ApatiteNE"
+		;;
+	  Apatite|apatite|dt50)
+		PRODUCT_CURRENT_VERSION="Desktop 5.0"
+		PRODUCT_CURRENT_PROJECT="Apatite"
+		;;
+	  Sylph|sylph|dt6|dt60|dt6.0|dt60sp1|dt61|dt6.1)
+		PRODUCT_CURRENT_VERSION="Desktop 6.0"
+		PRODUCT_CURRENT_PROJECT="Sylph"
+		;;
+	  KunlunJade|kunlunjade|Kunlunjade|dt62|dt6sp2|dt6.2)
+		PRODUCT_CURRENT_VERSION="Desktop 6.0 SP2"
+		PRODUCT_CURRENT_PROJECT="KunlunJade"
+		;;
+	  SuetJade|suetjade|Suetjade|dt62u|dt6sp2u|dt6.2u|DT63|dt63|DT6.3|dt6.3)
+		PRODUCT_CURRENT_VERSION="Desktop 6.0 SP3"
+		PRODUCT_CURRENT_PROJECT="SuetJade"
+		;;
+	  SuetJade2011|suetjade2011|Suetjade2011|dt63u|dt6sp3u|dt6.3u|DT63U|DT6.3.1|dt6.3.1)
+		PRODUCT_CURRENT_VERSION="Desktop 6.0 SP3 2011"
+		PRODUCT_CURRENT_PROJECT="SuetJade2011"
+		;;
+	  Olympics|olympics|dt70)
+		PRODUCT_CURRENT_VERSION="Desktop 7.0"
+		PRODUCT_CURRENT_PROJECT="Olympics"
+		;;
+	  Mpfr|mpfr|MPFR)
+		PRODUCT_CURRENT_VERSION="Pkunity Mpfr"
+		PRODUCT_CURRENT_PROJECT="Mprc"
+		;;
+	  InMini|inMini|inmini)
+		PRODUCT_CURRENT_VERSION="InMini"
+		PRODUCT_CURRENT_PROJECT="InMini"
+		;;
+	  XiZhi|xizhi|Xizhi)
+		PRODUCT_CURRENT_VERSION="InMini 2010"
+		PRODUCT_CURRENT_PROJECT="XiZhi"
+		;;
+	  DT64|dt64|JointJade|jointjade)
+		PRODUCT_VENDOR="Qomo Project"
+		PRODUCT_PACKAGER="qomobugs\@redflag-linux.com"
+		PRODUCT_CURRENT_VERSION="0.7"
+		PRODUCT_CURRENT_PROJECT="JointJade"
+		;;
+	  newCerf|newcerf|NEWCERF)
+		PRODUCT_CURRENT_VERSION="newCerf"
+		PRODUCT_CURRENT_PROJECT="newCerf"
+		;;
+	  Cerf|cerf|CERF)
+		PRODUCT_CURRENT_VERSION="Cerf"
+		PRODUCT_CURRENT_PROJECT="Cerf"
+		;;
+	  Bell|bell|BELL)
+		PRODUCT_CURRENT_VERSION="Bell"
+		PRODUCT_CURRENT_PROJECT="Bell"
+		;;
+	  CTNode|CTNODE|ctnode)
+		PRODUCT_CURRENT_VERSION="CTNode 1.0"
+		PRODUCT_CURRENT_PROJECT="CTNode"
+		;;
+	  *)
+		echo
+		echo "Unsupported project: ${e}$jver${r}"
+		echo
+	#	echo "so its name should be one of:"
+	#	echo "newpkg_admin.apatitene, newpkg_admin.apatite, newpkg_admin.sylph or newpkg_admin.dt70_preview"
+	#	echo
+		exit 1
+	esac	
+	
+	jver=$PRODUCT_CURRENT_PROJECT
+	
+    if [ $_bflg = off -a $_pflg = off -a $_cflg = off ] ; then
+		mark=B
+    fi
+
+    shift `expr $OPTIND - 1`
+    srpms=$*
+	#echo OPTIND=$OPTIND srpms=$srpms
+	#exit 1
+
+	if [ -z $jver ]; then
+		echo "${e}No project name specified.${r}" | tee -a ${log}
+		echo | tee -a ${log}
+		echo "Only support the following projects:" | tee -a ${log}
+		echo "${p}Apatite | ApatiteNE | InMini | JointJade | KunlunJade | Mprc | Olympics | Sylph | SuetJade | SuetJade2011 | Xuanyuan ${r}" | tee -a ${log}
+		echo | tee -a ${log}
+		return 1
+	else
+		echo -e "${p}Project Name:\t\t${jver}${r}" | tee -a ${log}
+	fi
+
+	log=/vbuild/tmp/newpkg-$jver-$DATE.$$.log
+
+	srpms_num=0
+    if [ -z "$srpms" ] ; then
+		echo "${e}No source rpm specified.${r}" | tee -a ${log}
+		return 1
+    else
+	# Checking path
+		for _srpm in $srpms;
+		do
+			#if ! echo $_srpm|grep "^/" >/dev/null 2>&1; then
+			#	echo "Please input ${p}the absolute path${r} of the package: ${e}$_srpm${r}" | tee -a ${log}
+				#exit 1
+			#	return 1
+			#fi
+			if [ ! -f $_srpm ]; then
+				echo "$_srpm do NOT exist."| tee -a ${log}
+				_fails="$_fails _srpm"
+				#return 1
+			else
+				srpms_num=`expr $srpms_num + 1`
+			fi
+		done
+		if [ "$srpms_num" = 0 ]; then
+			echo "${e}No source rpm can be found.${r}" | tee -a ${log}
+			return 1
+		fi
+    fi
+
+    return 0
+}
+
+buildnow()
+{
+	# if no fails, build the new packages
+	#if [ -z "$_fails" -a "$_buildnow" = "on" -a -n "$_pkgs" ]; then
+	if [ "$_buildnow" = "on" -a -n "$_pkgs" ]; then
+		echo "${p}Building the new packages now.${r}" | tee -a ${log}
+
+		bldpkg_opts="-j ${jver}"
+		if [ "$yes" = "on" ]; then
+			bldpkg_opts="$bldpkg_opts -y"
+		fi
+
+		for loop in $_pkgs;
+		do
+			_ver=`echo $loop|cut -d "-" -f2-`
+			while echo $_ver | grep -q "\-"; 
+			do
+				_ver=`echo $_ver | cut -d "-" -f2-`
+			done
+			_pkg=`echo $loop|sed -e "s/-$_ver$//g"`
+
+			# do build
+			echo -e "${p}Excuting cmd: bldpkg $bldpkg_opts -v $_ver $_pkg ${r}" | tee -a ${log}
+			bldpkg $bldpkg_opts -v $_ver $_pkg | tee -a ${log}
+		done
+	fi
+}
+
+check_dir()
+{
+    _dir=${1:-/noexistent}
+    _mkdir=${2:-off}
+
+    if [ ! -d $_dir ] ; then
+	if [ $_mkdir = on ] ; then
+	    echo "${s}* Creating directory: $_dir${r}" | tee -a ${log}
+	    mkdir -p $_dir
+	    _st=$?
+	    chgrp $GROUP $_dir
+	    chmod 0755 $_dir
+	else
+	    echo "${e}$_dir: No such directory.${r}" | tee -a ${log}
+	    _st=1
+	fi
+    else
+	if [ ! -x $_dir ] ; then
+	    echo "${e}$_dir: no permission.${r}" | tee -a ${log}
+	    _st=1
+	fi
+    fi
+
+    return $_st
+}
+
+check_tags()
+{
+
+        pushd $workdir >/dev/null 2>&1
+if false; then
+        echo -e "\t${s}* Checking blacklist of rpm package ...${r}" | tee -a ${log}
+		Black_List="redhat rhel 'red hat' fedora suse opensuse"
+		BL_Fails=
+		for loop in redhat rhel 'red hat' fedora suse opensuse
+		#for loop in $Black_List
+		do
+			echo -ne "\t${loop}  " | tee -a ${log}
+			if grep -iw "${loop}" $1 |grep -vi "ftp://"|grep -vi "http://"|grep -vi "url:">/dev/null 2>&1; then
+				echo -e "\t\t${E}Failed.${r}" | tee -a ${log}
+				echo "$loop in black list. Please remove it from spec files." | tee -a ${log}
+				BL_Fails="$loop $BL_Fails"
+			else
+				echo -e "\t\t${p}Passed.${r}" | tee -a ${log}
+			fi
+		done
+		[ -n "$BL_Fails"	] && return 1
+		echo | tee -a ${log}
+
+        echo -e "\t${s}* Checking group of rpm package ...${r}" | tee -a ${log}
+        cvs co Rules/groups_of_rpm.rule >/dev/null 2>&1 || return 1
+        for groups_in_spec in `grep -i "^group[[:space:]]*:" $1|cut -d ":" -f2|sed -e "s/^[[:space:]]*//g"|sed -e "s/ /,/g"`;
+        do
+                _match=0
+				# remove the last char '\'
+				groups_in_spec=${groups_in_spec%\\}
+                for groups_in_rule in `cat Rules/groups_of_rpm.rule|sed -e "s/ /,/g"`;
+                do
+                        _tmp1_group=`echo $groups_in_spec|sed -e "s/,/ /g"|sed -e "s/^[[:space:]]*//g"|sed -e "s/[[:space:]]*$//g"`
+                        _tmp2_group=`echo $groups_in_rule|sed -e "s/,/ /g"|sed -e "s/^[[:space:]]*//g"|sed -e "s/[[:space:]]*$//g"`
+                        if [ "${_tmp1_group}" = "${_tmp2_group}" ]; then
+                                _match=1
+				perl -p -i -e "s,^Group:.*${_tmp1_group}[[:space:]]*$,Group:\t${_tmp1_group}\n,g" $1
+							#_fails="$_fails $1"
+                                #break
+                        fi
+                done
+		echo -ne "\t${_tmp1_group}  " | tee -a ${log}
+                if [ $_match = 0 ]; then
+			echo "${e}Failed.${r}" | tee -a ${log}
+                        echo "${e}Wrong group in spec of rpm package.${r}" | tee -a ${log}
+#						_fails="$_fails $_srpm"
+                        return 1
+		else
+			echo -e "\t\t${p}Passed.${r}" | tee -a ${log}
+                fi
+        done
+
+	# Change Vendor
+	echo -e "\t${s}* Changing Vendor of rpm package ...${r}" | tee -a ${log}
+	if grep "^[Vv]endor:" $1 >/dev/null 2>&1 ; then
+		perl -p -i -e "s/^Vendor:.*/Vendor:\t${PRODUCT_VENDOR}/g" $1
+		#echo "Keep the original Vendor information."
+	else
+		echo "No Vendor information. Set Vendor ${PRODUCT_VENDOR}." | tee -a ${log}
+		perl -p -i -e "s/^License:/Vendor:\t${PRODUCT_VENDOR}\nLicense:/g" $1
+	fi
+
+	# Change Distribution
+	if grep "^[Dd]istribution:" $1 >/dev/null 2>&1 ; then
+		perl -p -i -e "s/^[Dd]istribution:.*/Distribution:\t${PRODUCT_VENDOR} ${PRODUCT_CURRENT_VERSION}/g" $1
+	else
+		perl -p -i -e "s/^License:/Distribution:\t${PRODUCT_VENDOR} ${PRODUCT_CURRENT_VERSION}\nLicense:/g" $1
+	fi
+
+	# Change Packager
+	if grep "^[Pp]ackager:" $1 >/dev/null 2>&1 ; then
+		perl -p -i -e "s/^[Pp]ackager:.*/Packager:\t${PRODUCT_PACKAGER}/g" $1
+	else
+		perl -p -i -e "s/^License:/Packager:\t${PRODUCT_PACKAGER}\nLicense:/g" $1
+	fi
+
+fi
+	popd >/dev/null 2>&1
+	return 0
+}
+
+checkout_packages()
+{
+#    check_dir $workdir/packages on || return 1
+#    if ! check_dir $workdir/"${jver}" on; then
+#		mkdir $workdir/"${jver}" -p
+#	fi
+
+    #echo "${s}* Checking out all packages from CVS repository for ${p}$jver ...${r}" | tee -a ${log}
+    echo "${s}* Checking out $jver/VERMAP from CVS repository for ${p}$jver ...${r}" | tee -a ${log}
+
+    #(cd $workdir && cvs co $jver) || return 1
+	pushd $workdir >/dev/null 2>&1
+
+	if ! cvs co $jver/VERMAP >/dev/null 2>&1 ; then
+	#	# If not exist, then create new project repository
+	#	mkdir -p $jver
+	#	cvs add $jver
+	#	cvs ci -m "Build CVS repository for $jver" $jver >/dev/null 2>&1
+
+		# Just return
+		mkdir -p $jver/
+		touch VERMAP
+		cvs add VERMAP
+	fi
+
+    return 0
+}
+
+register_sources()
+{
+for _srpm in $srpms
+do
+	_ndirs=
+	_nfiles=
+	_efiles=
+	_exists=false
+
+	# _ppass is checking status of the package of _srpm, 
+	# 0 means failure or warning, 
+	# 1 means OK/passed
+	_ppass=1
+
+	echo "$_srpm" | grep '\.src\.rpm$' > /dev/null 2>&1 | tee -a ${log}
+	if [ $? '!=' 0 ] ; then
+	    echo "${e}$_srpm: not source rpm${r}" | tee -a ${log}
+		_fails="$_fails $_srpm"
+		_ppass=0
+		continue
+	    #return 1
+	fi
+
+	eval `rpm -qp --qf "pname=%{NAME};pver=%{VERSION};" $_srpm`
+	if [ $? '!=' 0 ] ; then
+	    echo "${e}$_srpm: rpm -qp error${r}" | tee -a ${log}
+		_fails="$_fails $_srpm"
+		_ppass=0
+		continue
+	    #return 1
+	fi
+
+	if [ -z "$pname" -o -z "$pver" ] ; then
+	    echo "${e}Failed to name/version from src rpm.${r}" | tee -a ${log}
+		_fails="$_fails $_srpm"
+		_ppass=0
+		continue
+	    #return 1
+	fi
+
+	# update VERMAP
+	pushd $workdir >/dev/null 2>&1
+	cvs co $jver/VERMAP >/dev/null 2>&1
+	cvs co $jver/$pname/$pver >/dev/null 2>&1
+	popd
+	echo | tee -a ${log}
+	echo "${p}===== $pname $pver =====${r}" | tee -a ${log}
+
+	if [ -f $workdir/${jver}/VERMAP ] ; then
+	    echo "${s}* Checking VERMAP ...${r}" | tee -a ${log}
+	    #grep "^$pname:[BPC]\+:$jver:$pver:" \
+	    grep "^$pname:.*:$jver:$pver:" \
+		$workdir/"${jver}"/VERMAP
+		if [ $? = 0 ] ; then
+			echo "${w}$pname-$pver already in VERMAP. - ignored${r}" | tee -a ${log}
+			if [ $force = off ] ; then
+				_fails="$_fails $_srpm"
+				_ppass=0
+				continue
+			else
+				_exists=true
+			fi
+	    fi
+	else
+	    touch $workdir/"${jver}"/VERMAP
+	    _nfiles="$nfiles VERMAP"
+	fi
+
+	check_dir $workdir/distfiles/$jver/$pname on || return 1
+#	rpm2cpio $_srpm | \
+#	    (cd $workdir/distfiles$jver/$pname; cpio -iumd) > /dev/null 2>&1 ||
+
+	    (cd $workdir/distfiles/$jver/$pname; rpm2cpio $_srpm | cpio -iumd) > /dev/null 2>&1 ||
+		{
+		echo "${e}Operating $_srpm failed.${r}" | tee -a ${log} ;
+		_fails="$_fails $_srpm"
+		_ppass=0
+		continue
+		}
+
+	if [ -d $workdir/"${jver}"/$pname ] ; then
+		if [ -f $workdir/"${jver}"/$pname/$pver/*spec* ] ; then
+			echo -n "${w}Package ${pname}-${pver} already in repository. ${r}" | tee -a ${log}
+			if [ $force = off ] ; then
+				_fails="$_fails $_srpm"
+				echo "${w}Ignored $_srpm.${r}" | tee -a ${log}
+				continue;
+			else
+				echo "${w}- forcely overwrited by $user.${r}" | tee -a ${log}
+				_exists=true
+			fi
+		else
+			check_dir $workdir/"${jver}"/$pname/$pver on || return 1
+			_ndirs="$_ndirs $pname/$pver"
+	    fi
+	else
+	    check_dir $workdir/"${jver}"/$pname/$pver on || return 1
+	    _ndirs="$_ndirs $pname $pname/$pver"
+	fi
+
+	#_spec=`ls $workdir/distfiles$jver/$pname/*.spec` || return 1
+	_spec=`ls $workdir/distfiles/$jver/$pname/*.spec` || {
+		_fails="$_fails $_srpm" ; 
+		_ppass=0
+		continue;
+		}
+	_cnt=`printf "%s\n" $_spec | wc -l | awk '{print $1}'`
+	if [ $_cnt '!=' 1 ] ; then
+	    echo "${e}spec file error.${r}" | tee -a ${log}
+	    #return 1
+	    _fails="$_fails $_srpm"
+		_ppass=0
+		continue
+	fi
+
+	echo "${s}* SPEC FILE:${r}" | tee -a ${log}
+	#echo -e "${p}\t`basename $_spec`${r}"
+	#echo -e "${p}\t$_spec${r}"|sed "s@$workdir/distfiles$jver/$pname@$cvsroot/$jver/$pname/$pver@g" | tee -a ${log}
+	echo -e "${p}\t$_spec${r}"|sed "s,$workdir/distfiles/$jver/$pname,$cvsroot/$jver/$pname/$pver,g" | tee -a ${log}
+	#check_tags $_spec || return 1
+	check_tags $_spec || {
+		_fails="$_fails $_srpm"; 
+		continue;
+	}
+	#_specfn=`echo $_spec | sed "s@$workdir/distfiles$jver/$pname/@@"`
+	_specfn=`echo $_spec | sed "s,$workdir/distfiles/$jver/$pname/,,"`
+	#echo "	\$CVSROOT/"${jver}"/$pname/$pver/$_specfn"
+	if [ ! -f $workdir/"${jver}"/$pname/$pver/$_specfn ] ; then
+	    _nfiles="$_nfiles $pname/$pver/$_specfn"
+	elif [ $force = on ] ; then
+	    _efiles="$_efiles $pname/$pver/$_specfn"
+	fi
+	#echo "$_nfiles$_efiles"
+
+	echo "${s}* DISTFILES:${r}"	    | tee -a ${log} 
+	_dfiles=`find $workdir/distfiles/$jver/$pname ! -type d -print | \
+	    fgrep -v $_spec`
+	if [ $ver = off ] ; then
+	    for _df in $_dfiles
+	    do
+		#_dtof=`echo $_df | sed "s@$workdir/distfiles$jver/@$distdir/@g"`
+		_dtof=`echo $_df | sed "s,$workdir/distfiles/$jver/,$distdir/,g"`
+		echo -e "${p}\t$_dtof${r}" | tee -a ${log}
+	    done
+	else
+	    for _df in $_dfiles
+	    do
+		#_dtof=`echo $_df | sed "s@$workdir/distfiles$jver/$pname@$distdir/$pname/$pver@g"`
+		_dtof=`echo $_df | sed "s,$workdir/distfiles/$jver/$pname,$distdir/$pname/$pver,g"`
+		echo -e "${p}\t$_dtof${r}" | tee -a ${log}
+	    done
+	fi
+
+	y_or_n || continue
+
+	cp -p $_spec $workdir/"${jver}"/$pname/$pver/$_specfn
+
+	trap "echo \"${w}SIGNAL recived - ignored.${r}\"" SIGINT SIGTERM
+
+	case $pname in
+	  kernel|glibc)
+		ARCH="$arch,i686"
+		;;
+	  *)
+		ARCH="$arch"
+		;;
+	esac
+	if [ "$INSTALL" = "on" ]; then
+		inst=I
+	else
+		inst=U
+	fi
+	if [ $_exists = false -o $force = on ] ; then
+	    echo "${s}* Updating VERMAP ..." | tee -a ${log}
+	    echo "$pname:$mark:$jver:$pver:$ARCH:$inst" >> $workdir/"${jver}"/VERMAP || \
+		return 1
+	    /bin/sort < $workdir/"${jver}"/VERMAP |uniq > $workdir/"${jver}"/VERMAP.tmp \
+		|| return 1
+	    egrep -v '^$|^[ 	]\+$' $workdir/"${jver}"/VERMAP.tmp \
+		> $workdir/"${jver}"/VERMAP
+		#pushd $workdir
+	    #echo "${s}* Registering in VERMAP ...${r}" | tee -a ${log}
+		#cvs ci "${jver}"/VERMAP
+		#cp "${jver}"/VERMAP /tmp
+		#popd
+	fi
+	
+	if [ ! -z "$_ndirs" ] ; then
+	    echo "${s}* adding new directories to repository ...${r}" | tee -a ${log}
+	    printf "	%s\n" $_ndirs |tee -a ${log}
+	    #(cd $workdir/"${jver}"; cvs add $_ndirs) || return 1
+	    (cd $workdir/"${jver}"; cvs add $_ndirs|tee -a ${log}) || {
+			_fails="$_fails $_srpm" ; 
+			_ppass=0
+			continue;
+			}
+	    echo | tee -a ${log}
+	fi
+	if [ ! -z "$_nfiles" ] ; then
+	    echo "${s}* adding new files to repository ...${r}" | tee -a ${log}
+	    printf "	%s\n" $_nfiles
+	    #(cd $workdir/"${jver}"; cvs add $_nfiles) || return 1
+	    (cd $workdir/"${jver}"; cvs add $_nfiles) || {
+			_fails="$_fails $_srpm" ; 
+			_ppass=0
+			continue;
+			}
+	    echo | tee -a ${log}
+	fi
+	if [ ! -z "$_ndirs" -o ! -z "$_nfiles" -o ! -z "$_efiles" ] ; then
+	    echo "${s}* commit directories/files to repository ...${r}" |tee -a ${log}
+		cvs di -u $workdir/"${jver}"/$pname/$pver/*.spec 
+		# the same revision, skip to commit.
+		if [ $? = 0 -a "$_ppass" = "1" ]; then
+			echo "${w}The same revision of $_srpm already registered in Repo. Skipped.${r}" | tee -a ${log}
+			_warnings="$_warnings $_srpm"
+			_ppass=0
+			rm -rf $pname/$pver/
+			continue
+		# different revision, just do it.
+		else
+			# dist files, all files except spec file
+			if [ ! -z "$_dfiles" ] ; then
+		    	#check_dir $distdir/$pname/$pver on || return 1
+		    	check_dir "$distdir/$pname/$pver" on || {
+					_fails="$_fails $_srpm" ; 
+					continue;
+					}
+				for _df in $_dfiles
+				do
+		    		_dtof=`echo $_df | sed "s!$workdir/distfiles"/${jver}"/$pname!$distdir/$pname/$pver!g"`
+					#_dtof=`echo $_df | sed "s,$workdir/distfiles"${jver}"/$pname,\"$distdir/$pname/$pver,g" | sed -e "s,$,\",g" | sed "s,@,\\@,g"`
+					#check_dir $distdir/$pname/$pver on || return 1
+		    		check_dir "$distdir/$pname/$pver" on || {
+						_fails="$_fails $_srpm" ; 
+						continue;
+						}
+#		    		cp -v -p $cpopt $_df $_dtof || return 1
+		    		#cp -v $cpopt $_df $_dtof || return 1
+#					echo "======$_df======$_dtof======" | tee -a ${log} 
+		    		cp $cpopt "$_df" "$_dtof" || {
+						_fails="$_fails $_srpm" ; 
+						continue;
+						}
+					chmod +r "$_dtof"
+				done
+			fi
+			# spec file
+		#if [ -f $workdir/"${jver}"/$pname/$pver/*spec* ] ; then
+			cvs ci -m"baselined by $user" 2>/dev/null |grep -v "Examining " | tee -a ${log} || {
+				_fails="$_fails $_srpm" ; 
+				_ppass=0
+				rm -rf $pname/$pver/
+				continue;
+				}
+			# re-check spec file
+			cvs di -u $workdir/"${jver}"/$pname/$pver/*.spec 
+			# failure
+			if [ $? != 0 ]; then
+				_fails="$_fails $_srpm"
+				continue
+			# success
+			else
+				_pkgs="$_pkgs $pname-$pver"
+			fi
+		fi
+	    echo | tee -a ${log}
+	fi
+
+# drop the following lines, jzwang@redflag-linux.com, 2008/12/05
+# begin of comment
+# end of comment
+
+	rm -rf $workdir/distfiles"${jver}"/$pname
+
+	trap "error_exit \"SIGNAL recieved\"" SIGINT SIGTERM
+done
+}
+
+summary_result()
+{
+	if [ ! -z "$_warnings" ] ; then
+		echo  | tee -a ${log}
+		echo "${s}${w}WARNING PACKAGE(S):${r}" | tee -a ${log}
+		printf "    ${w}%s\n${r}" $_warnings | sort -uf | tee -a ${log}
+		#echo "${r}More info can be found in the log file: ${p}${log}${r}" | tee -a ${log}
+	fi
+
+	if [ ! -z "$_fails" ] ; then
+		echo  | tee -a ${log}
+		echo "${s}${e}ERROR PACKAGE(S):${r}" | tee -a ${log}
+		printf "    ${e}%s\n${r}" $_fails | sort -uf | tee -a ${log}
+		#echo "${r}More info can be found in the log file: ${p}${log}${r}" | tee -a ${log}
+	fi
+
+	#if [ -z "$_fails" -a "$_buildnow" = "on" -a -n "$_pkgs"  ] ; then
+	if [ "$_buildnow" = "on" -a -n "$_pkgs"  ] ; then
+		echo "${r}The new packages have been built now.${r}" | tee -a ${log}
+	fi
+
+	echo "${r}More info can be found in the log file: ${p}${log}${r}" | tee -a ${log}
+	return 0
+}
+
+# main routine
+init_variables || error_exit
+parse_args $* || error_exit
+check_dir $distdir || error_exit
+check_dir $workdir on || error_exit
+trap "error_exit \"SIGNAL recieved\"" SIGINT SIGTERM
+
+checkout_packages || error_exit 'ERROR: failed to checkout packages from CVS for $jver.'
+register_sources || error_exit 'ERROR: failed to register source RPM.'
+buildnow
+summary_result
+cleanup_workdir
+
+if [ ! -z "$_fail" ] ; then
+	exit 1
+fi
+
+exit 0

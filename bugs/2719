@@ -1,0 +1,254 @@
+upgrade node step:
+OVIRT_UPGRADE: /tmp/ovirt_upgraded
+1. init
+_tmp_dirtempfile.mkdtemp(dir="/data")
+_chroot_path: /data/rootfs
+_squashfs_dir: /data/squashfs
+_ovirtnode_dir: /data/ovirtnode
+_ext_image: /data/squashfs/LiveOS/ext3fs.img
+_hooks_path: usr/libexec/ovirt-node/hooks/
+
+2. run
+
+2.1 _parse_options
+add_options: --boot reboot skip-existing-hooks iso and so on
+
+2.2 lockfile
+_option.iso_file, iso_tmp: tmpiso_data
+
+2.3 _extrac_rootfs
+mount -o loop iso /live
+/rootfs/usr/lib/python/squashfs
+mkdir /data/squashfs
+mount -o loop /live/LiveOS/squashfs.img /data/squashfs
+mkdir /data/rootfs
+mount -o loop /data/squashfs/LiveOS/ext3fs.img /data/rootfs
+
+2.4 _run_hooks("pre-upgrade") 
+stage: the hook directory: /usr/libexec/ovirt-node/hooks
+/data/rootfs/pre-upgrade
+_system(hook)
+
+2.5 _run_upgrade()
+_python_lib: /data/rootfs/usr/lib/python
+/data/rootfs/usr/lib/python/site-packages/
+_tmp_python_path: /data/rootfs/usr/lib/python/site-packages/ovirtnode
+shutil.copytree(_tmp_python_path, _ovirtnode_dir)
+install.Install()
+upgrade.ovirt_boot_setup()
+
+2.5.1 install.Install
+
+2.5.1.1 init部分
+Storage()，根据/etc/default/ovirt配置文件和code逻辑进行调整
+
+2.5.1.2 kernel_image_copy()
+cp -p /live/isolinux/vmlinuxz0 /liveos(/boot)
+cp -p /live/isolinux/initrd0.img /liveos
+cp -p /live/isolinux/version /liveos
+cp -p /live/isolinux/LiveOS/squashfs.img /liveos/LiveOS
+
+2.5.1.3 generate_paths()
+mount -o bind /run/initramfs/live /live
+初始化路径: grub, grub2
+initrd_dest
+grub_dir
+grub_prefix
+
+2.5.1.4 grub_install()
+配置grub
+
+2.5.1.5 grub2_install()
+配置grub2
+
+2.5.1.6 ovirt_boot_setup()
+调用generate_paths()
+grub_config_file: /dev/.initramfs/live/grub/grub.conf
+umount /liveos/efi
+umount /liveos
+umount /boot
+调用kernel_image_copy
+网络配置从/etc/default/ovirt读出
+grub_install() or grub2_install()
+
+2.6 _run_hooks("post-upgrade")
+/data/rootfs/post-upgrade
+
+2.7 _cleanup()
+umount _chroot_path, _squarshfs_dir, /live
+shutil.remtree(self._tmp_dir)
+
+3 测试数据
+3.1 ovirt-node-upgrade -h
+[root@localhost log]# ovirt-node-upgrade -h
+node-upgrade.UpgradeTool: INFO     Temporary Directory is: /data/tmp2zJzik (tmp2zJzik是随即生成的)
+ERROR:root:=== in UpgradeTool_init, self._tmp_dir: /data/tmp2zJzik
+ERROR:root:=== in UpgradeTool_init, self._chroot_dir: /data/tmp2zJzik/rootfs
+ERROR:root:=== in UpgradeTool_init, self._squashfs_dir: /data/tmp2zJzik/squashfs
+ERROR:root:=== in UpgradeTool_init, self._ovirtnode_dir: /data/tmp2zJzik/ovirtnode
+ERROR:root:=== in UpgradeTool_init, self._ext_image: /data/tmp2zJzik/squashfs/LiveOS/ext3fs.img
+Usage: ovirt-node-upgrade [options]
+
+Options:
+  -h, --help            show this help message and exit
+  --reboot=REBOOT       Perform reboot after upgrade, argument is amount of
+                        delay in seconds
+  --skip-existing-hooks
+                        Use only new hooks from provided iso
+  --iso=FILE            Image to use for upgrade, use - to read from stdin
+
+3.2 升级
+[root@localhost log]# ovirt-node-upgrade -h
+node-upgrade.UpgradeTool: INFO     Temporary Directory is: /data/tmpO9bJWI
+ERROR:root:=== in UpgradeTool_init, self._tmp_dir: /data/tmpO9bJWI
+ERROR:root:=== in UpgradeTool_init, self._chroot_dir: /data/tmpO9bJWI/rootfs
+ERROR:root:=== in UpgradeTool_init, self._squashfs_dir: /data/tmpO9bJWI/squashfs
+ERROR:root:=== in UpgradeTool_init, self._ovirtnode_dir: /data/tmpO9bJWI/ovirtnode
+ERROR:root:=== in UpgradeTool_init, self._ext_image: /data/tmpO9bJWI/squashfs/LiveOS/ext3fs.img
+Usage: ovirt-node-upgrade [options]
+
+Options:
+  -h, --help            show this help message and exit
+  --reboot=REBOOT       Perform reboot after upgrade, argument is amount of
+                        delay in seconds
+  --skip-existing-hooks
+                        Use only new hooks from provided iso
+  --iso=FILE            Image to use for upgrade, use - to read from stdin
+[root@localhost log]# ovirt-node-upgrade --iso=/var/log/ctvn-3.5.0.0.11-20151118-194342.iso --reboot=0
+node-upgrade.UpgradeTool: INFO     Temporary Directory is: /data/tmp5rx3F7
+ERROR:root:=== in UpgradeTool_init, self._tmp_dir: /data/tmp5rx3F7
+ERROR:root:=== in UpgradeTool_init, self._chroot_dir: /data/tmp5rx3F7/rootfs
+ERROR:root:=== in UpgradeTool_init, self._squashfs_dir: /data/tmp5rx3F7/squashfs
+ERROR:root:=== in UpgradeTool_init, self._ovirtnode_dir: /data/tmp5rx3F7/ovirtnode
+ERROR:root:=== in UpgradeTool_init, self._ext_image: /data/tmp5rx3F7/squashfs/LiveOS/ext3fs.img
+DEBUG:node-upgrade.UpgradeTool:{'iso_file': '/var/log/ctvn-3.5.0.0.11-20151118-194342.iso', 'skip_existing_hooks': False, 'reboot': 0}
+ERROR:root:=== in run, self._options: {'iso_file': '/var/log/ctvn-3.5.0.0.11-20151118-194342.iso', 'skip_existing_hooks': False, 'reboot': 0}
+node-upgrade.LockFile: INFO     Acquiring Lock
+INFO:node-upgrade.LockFile:Acquiring Lock
+DEBUG:node-upgrade.UpgradeTool:('mount', '-o', 'loop', '/var/log/ctvn-3.5.0.0.11-20151118-194342.iso', '/live')
+DEBUG:node-upgrade.UpgradeTool:[]
+DEBUG:node-upgrade.UpgradeTool:
+DEBUG:node-upgrade.UpgradeTool:('mount', '-o', 'loop', '/live/LiveOS/squashfs.img', '/data/tmp5rx3F7/squashfs')
+DEBUG:node-upgrade.UpgradeTool:[]
+DEBUG:node-upgrade.UpgradeTool:
+DEBUG:node-upgrade.UpgradeTool:('mount', '-o', 'loop', '/data/tmp5rx3F7/squashfs/LiveOS/ext3fs.img', '/data/tmp5rx3F7/rootfs')
+DEBUG:node-upgrade.UpgradeTool:[]
+DEBUG:node-upgrade.UpgradeTool:
+ERROR:root:=== in hooks, stage: pre-upgrade
+ERROR:root:=== in hooks, hooks_path: ['/usr/libexec/ovirt-node/hooks/pre-upgrade', '/data/tmp5rx3F7/rootfs/usr/libexec/ovirt-node/hooks/pre-upgrade']
+node-upgrade.UpgradeTool: INFO     Running pre-upgrade hooks
+INFO:node-upgrade.UpgradeTool:Running pre-upgrade hooks
+node-upgrade.UpgradeTool: INFO     Running: 01-vdsm
+INFO:node-upgrade.UpgradeTool:Running: 01-vdsm
+ERROR:root:=== in hooks, note the uprow
+DEBUG:node-upgrade.UpgradeTool:('/usr/libexec/ovirt-node/hooks/pre-upgrade/01-vdsm',)
+DEBUG:node-upgrade.UpgradeTool:[u'/usr/libexec/ovirt-node/hooks/pre-upgrade/01-vdsm: Stopping vdsmd to upgrade']
+DEBUG:node-upgrade.UpgradeTool:
+node-upgrade.UpgradeTool: INFO     pre-upgrade hooks completed
+INFO:node-upgrade.UpgradeTool:pre-upgrade hooks completed
+node-upgrade.UpgradeTool: INFO     Running pre-upgrade hooks
+INFO:node-upgrade.UpgradeTool:Running pre-upgrade hooks
+node-upgrade.UpgradeTool: INFO     Running: 01-vdsm
+INFO:node-upgrade.UpgradeTool:Running: 01-vdsm
+ERROR:root:=== in hooks, note the uprow
+DEBUG:node-upgrade.UpgradeTool:('/data/tmp5rx3F7/rootfs/usr/libexec/ovirt-node/hooks/pre-upgrade/01-vdsm',)
+DEBUG:node-upgrade.UpgradeTool:[u'/data/tmp5rx3F7/rootfs/usr/libexec/ovirt-node/hooks/pre-upgrade/01-vdsm: Stopping vdsmd to upgrade']
+DEBUG:node-upgrade.UpgradeTool:
+node-upgrade.UpgradeTool: INFO     pre-upgrade hooks completed
+INFO:node-upgrade.UpgradeTool:pre-upgrade hooks completed
+ERROR:root:=== in _run_upgrade:
+node-upgrade.UpgradeTool: INFO     hooks: False
+INFO:node-upgrade.UpgradeTool:hooks: False
+ERROR:root:=== in _run_upgrade,_python_lib: ['/data/tmp5rx3F7/rootfs/usr/lib/python2.6']
+ERROR:root:=== in _run_upgrade,_tmp_python_path:/data/tmp5rx3F7/rootfs/usr/lib/python2.6/site-packages/ovirtnode
+DEBUG:node-upgrade.UpgradeTool:<module 'install' from '/data/tmp5rx3F7/ovirtnode/install.pyc'>
+node-upgrade.UpgradeTool: INFO     Installing Bootloader
+INFO:node-upgrade.UpgradeTool:Installing Bootloader
+ERROR:root:=== in hooks, stage: post-upgrade
+ERROR:root:=== in hooks, hooks_path: ['/usr/libexec/ovirt-node/hooks/post-upgrade', '/data/tmp5rx3F7/rootfs/usr/libexec/ovirt-node/hooks/post-upgrade']
+node-upgrade.UpgradeTool: INFO     Running post-upgrade hooks
+INFO:node-upgrade.UpgradeTool:Running post-upgrade hooks
+node-upgrade.UpgradeTool: INFO     Running: 01-sanlock-check
+INFO:node-upgrade.UpgradeTool:Running: 01-sanlock-check
+ERROR:root:=== in hooks, note the uprow
+DEBUG:node-upgrade.UpgradeTool:('/usr/libexec/ovirt-node/hooks/post-upgrade/01-sanlock-check',)
+DEBUG:node-upgrade.UpgradeTool:[u'Sending stop signal sanlock (11969): \x1b[60G[\x1b[0;32m  OK  \x1b[0;39m]', u'Waiting for sanlock (11969) to stop:\x1b[60G[\x1b[0;32m  OK  \x1b[0;39m]', u'Starting sanlock: \x1b[60G[\x1b[0;32m  OK  \x1b[0;39m]']
+DEBUG:node-upgrade.UpgradeTool:
+node-upgrade.UpgradeTool: INFO     post-upgrade hooks completed
+INFO:node-upgrade.UpgradeTool:post-upgrade hooks completed
+node-upgrade.UpgradeTool: INFO     Running post-upgrade hooks
+INFO:node-upgrade.UpgradeTool:Running post-upgrade hooks
+node-upgrade.UpgradeTool: INFO     Running: 01-sanlock-check
+INFO:node-upgrade.UpgradeTool:Running: 01-sanlock-check
+ERROR:root:=== in hooks, note the uprow
+DEBUG:node-upgrade.UpgradeTool:('/data/tmp5rx3F7/rootfs/usr/libexec/ovirt-node/hooks/post-upgrade/01-sanlock-check',)
+DEBUG:node-upgrade.UpgradeTool:[u'Sending stop signal sanlock (13765): \x1b[60G[\x1b[0;32m  OK  \x1b[0;39m]', u'Waiting for sanlock (13765) to stop:\x1b[60G[\x1b[0;32m  OK  \x1b[0;39m]', u'Starting sanlock: \x1b[60G[\x1b[0;32m  OK  \x1b[0;39m]']
+DEBUG:node-upgrade.UpgradeTool:
+node-upgrade.UpgradeTool: INFO     post-upgrade hooks completed
+INFO:node-upgrade.UpgradeTool:post-upgrade hooks completed
+node-upgrade.UpgradeTool: INFO     Upgrade Completed
+INFO:node-upgrade.UpgradeTool:Upgrade Completed
+node-upgrade.UpgradeTool: INFO     Cleaning up temporary directory
+INFO:node-upgrade.UpgradeTool:Cleaning up temporary directory
+ERROR:root:=== in cleanup, dir: /data/tmp5rx3F7/rootfs
+DEBUG:node-upgrade.UpgradeTool:('/bin/umount', '/data/tmp5rx3F7/rootfs')
+DEBUG:node-upgrade.UpgradeTool:[]
+DEBUG:node-upgrade.UpgradeTool:
+ERROR:root:=== in cleanup, dir: /data/tmp5rx3F7/squashfs
+DEBUG:node-upgrade.UpgradeTool:('/bin/umount', '/data/tmp5rx3F7/squashfs')
+DEBUG:node-upgrade.UpgradeTool:[]
+DEBUG:node-upgrade.UpgradeTool:
+ERROR:root:=== in cleanup, dir: /live
+DEBUG:node-upgrade.UpgradeTool:('/bin/umount', '/live')
+DEBUG:node-upgrade.UpgradeTool:[]
+DEBUG:node-upgrade.UpgradeTool:
+[root@localhost log]# 
+
+3.3 Install前，做了什么事？(有一个bug，把ssh的配置文件修改了，我们可以在这persist一下)
+三次mount：把新镜像的文件系统挂载在临时目录
+('mount', '-o', 'loop', '/var/log/ctvn-3.5.0.0.11-20151118-194342.iso', '/live')
+('mount', '-o', 'loop', '/live/LiveOS/squashfs.img', '/data/tmp5rx3F7/squashfs')
+('mount', '-o', 'loop', '/data/tmp5rx3F7/squashfs/LiveOS/ext3fs.img', '/data/tmp5rx3F7/rootfs')
+执行pre-upgrade hooks, 1-vdsm: stop vdsmd
+[root@localhost ~]# rpm -qf /usr/libexec/ovirt-node/hooks/pre-upgrade/01-vdsm 
+ovirt-node-plugin-vdsm-0.2.2-7.el6.noarch
+
+3.4 Install,做了什么事？怎样替换原来系统的？原来的系统如何启动？都替换了什么？
+root(hd0,1) root
+root(hd0,2)	RootBackup
+
+3.5 Install后，做了什么事？
+都是post-upgrade: 01-sanlock-check
+
+3.6 clean up
+
+对应log:
+安装系统日志：ovirt.log
+系统配置日志： ovirt-node.log
+系统升级日志： ovirt-node-upgrade.log
+
+Thread-104958::INFO::2015-11-19 11:13:30,327::logUtils::44::dispatcher::(wrapper) Run and protect: copyImage(sdUUID='8018f343-56c8-4d80-a447-b8847048eef6', spUUID='00000002-0002-0002-0002-000000000212', vmUUID='', srcImgUUID='58e93af4-b4d3-479b-a8d0-c3cb7977ae75', srcVolUUID='13a1c417-803e-48a0-8b1e-810bdd95c4a1', dstImgUUID='c5b0b46d-3f9f-4bf6-86fb-95947f1e8ae0', dstVolUUID='c6bcfca4-ff29-422c-99e1-4743b4b2f4bc', description='Active VM', dstSdUUID='8018f343-56c8-4d80-a447-b8847048eef6', volType=6, volFormat=4, preallocate=2, postZero='false', force='false')
+
+d715cfe5-b90c-45dd-a9b8-9fd390be83ed::DEBUG::2015-11-19 11:13:34,929::utils::763::root::(execCmd) /bin/nice -n 19 /usr/bin/ionice -c 3 /usr/bin/qemu-img convert -t none -T none -f qcow2 /rhev/data-center/00000002-0002-0002-0002-000000000212/8018f343-56c8-4d80-a447-b8847048eef6/images/58e93af4-b4d3-479b-a8d0-c3cb7977ae75/13a1c417-803e-48a0-8b1e-810bdd95c4a1 -O qcow2 /rhev/data-center/mnt/blockSD/8018f343-56c8-4d80-a447-b8847048eef6/images/c5b0b46d-3f9f-4bf6-86fb-95947f1e8ae0/c6bcfca4-ff29-422c-99e1-4743b4b2f4bc (cwd None)
+
+50c7ee84-b72e-4ed8-b7d3-638a3b25eba6::DEBUG::2015-11-19 11:13:35,746::utils::763::root::(execCmd) /bin/nice -n 19 /usr/bin/ionice -c 3 /usr/bin/qemu-img convert -t none -T none -f qcow2 /rhev/data-center/00000002-0002-0002-0002-000000000212/8018f343-56c8-4d80-a447-b8847048eef6/images/a82091e0-10ed-4661-9740-af228f1c1584/e80c3246-cfbb-4870-aefb-5c21292b2771 -O qcow2 /rhev/data-center/mnt/blockSD/8018f343-56c8-4d80-a447-b8847048eef6/images/011b97b6-8eb8-44b1-a3ba-0e922a0f1dc2/fa4459d2-5b0f-46d5-b662-befc41e3eba8 (cwd None)
+
+db5f74f0-cb91-4f38-bb47-c50b7c0f3865::DEBUG::2015-11-19 11:24:08,790::utils::763::root::(execCmd) /bin/nice -n 19 /usr/bin/ionice -c 3 /usr/bin/qemu-img convert -t none -T none -f qcow2 /rhev/data-center/00000002-0002-0002-0002-000000000212/8018f343-56c8-4d80-a447-b8847048eef6/images/6b1ae593-2a8b-4c27-b19b-797572d7f106/a27d870a-8f63-4a55-b203-b1b0abdac379 -O qcow2 /rhev/data-center/mnt/blockSD/8018f343-56c8-4d80-a447-b8847048eef6/images/6cacc655-1bd6-4744-9f90-ad54f4357edd/f08849fa-36ea-4ff7-a821-96a753d0cb5f (cwd None)
+
+2f023ffc-0e71-4e44-ab7d-c58ae995e0ca::DEBUG::2015-11-19 11:24:10,507::utils::763::root::(execCmd) /bin/nice -n 19 /usr/bin/ionice -c 3 /usr/bin/qemu-img convert -t none -T none -f raw /rhev/data-center/00000002-0002-0002-0002-000000000212/8018f343-56c8-4d80-a447-b8847048eef6/images/c6388e75-0526-4b95-84da-53313b44971f/22dce5cb-34df-4abd-84dd-5bc9041846d1 -O raw /rhev/data-center/mnt/blockSD/8018f343-56c8-4d80-a447-b8847048eef6/images/fe4a0158-8442-45b0-9f7d-5759873b6e5e/256174b4-117c-4b06-8ba1-a03168021a14 (cwd None)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

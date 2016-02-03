@@ -1,0 +1,98 @@
+== 熟悉rpm命令 ==
+* RPM查询
+{{{
+选项与参数：
+查询已安装软件的资讯：
+-q  ：仅查询，后面接的软件名称是否有安装；
+-qa ：列出所有的，已经安装在本机 Linux 系统上面的所有软件名称；
+-qi ：列出该软件的详细资讯 (information)，包含开发商、版本与说明等；
+-ql ：列出该软件所有的文件与目录所在完整档名 (list)；
+-qc ：列出该软件的所有配置档 (找出在 /etc/ 底下的档名而已)
+-qd ：列出该软件的所有说明档 (找出与 man 有关的文件而已)
+-qR ：列出与该软件有关的相依软件所含的文件 (Required 的意思)
+-qf ：由后面接的文件名称，找出该文件属於哪一个已安装的软件；
+查询某个 RPM 文件内含有的资讯：
+-qp[icdlR]：注意 -qp 后面接的所有参数以上面的说明一致。但用途仅在於找出
+	    某个 RPM 文件内的资讯，而非已安装的软件资讯！注意！
+}}}
+{{{
+范例五：若要成功安装 logrotate ，他还需要什么文件的帮忙？
+[root@www ~]# rpm -qR logrotate
+/bin/sh
+config(logrotate) = 3.7.4-8
+libc.so.6
+....(以下省略)....
+# 由这里看起来，呵呵～还需要很多文件的支持才行喔！
+
+范例六：由上面的范例五，找出 /bin/sh 是那个软件提供的？
+[root@www ~]# rpm -qf /bin/sh
+bash-3.2-21.el5
+# 这个参数后面接的可是『文件』呐！不像前面都是接软件！
+# 这个功能在查询系统的某个文件属於哪一个软件所有的。
+
+范例七：假设我有下载一个 RPM 文件，想要知道该文件的需求文件，该如何？
+[root@www ~]# rpm -qpR filename.i386.rpm
+# 加上 -qpR ，找出该文件需求的数据！
+}}}
+
+* yum线上升级机制
+{{{
+范例二：找出 mdadm 这个软件的功能为何
+[root@www ~]# yum info mdadm
+Installed Packages      <==这说明该软件是已经安装的了
+Name   : mdadm          <==这个软件的名称
+Arch   : i386           <==这个软件的编译架构
+Version: 2.6.4          <==此软件的版本
+Release: 1.el5          <==释出的版本
+Size   : 1.7 M          <==此软件的文件总容量
+Repo   : installed      <==容器回报说已安装的
+Summary: mdadm controls Linux md devices (software RAID arrays)
+Description:            <==看到否？这就是 rpm -qi 嘛！
+mdadm is used to create, manage, and monitor Linux MD (software RAID)
+devices.  As such, it provides similar functionality to the raidtools
+package.  However, mdadm is a single program, and it can perform
+almost all functions without a configuration file, though a configuration
+file can be used to help with some common tasks.
+
+范例五：列出提供 passwd 这个文件的软件有哪些
+[root@www ~]# yum provides passwd
+passwd.i386 : The passwd utility for setting/changing passwords using PAM
+passwd.i386 : The passwd utility for setting/changing passwords using PAM
+# 找到啦！就是上面的这个软件提供了 passwd 这个程序！
+
+}}}
+  * base 这个容器内容
+{{{
+[base]：代表容器的名字！中刮号一定要存在，里面的名称则可以随意取。但是不能有两个相同的容器名称， 否则 yum 会不晓得该到哪里去找容器相关软件清单文件。
+name：只是说明一下这个容器的意义而已，重要性不高！
+mirrorlist=：列出这个容器可以使用的映射站台，如果不想使用，可以注解到这行；
+baseurl=：这个最重要，因为后面接的就是容器的实际网址！ mirrorlist 是由 yum 程序自行去捉映射站台， baseurl 则是指定固定的一个容器网址！我们刚刚找到的网址放到这里来啦！
+enable=1：就是让这个容器被启动。如果不想启动可以使用 enable=0 喔！
+gpgcheck=1：还记得 RPM 的数码签章吗？这就是指定是否需要查阅 RPM 文件内的数码签章！
+gpgkey=：就是数码签章的公钥档所在位置！使用默认值即可
+}}}
+== 认识与学习 BASH ==
+* 数据流重导向
+
+    标准输入　　(stdin) ：代码为 0 ，使用 < 或 << ；
+    标准输出　　(stdout)：代码为 1 ，使用 > 或 >> ；
+    标准错误输出(stderr)：代码为 2 ，使用 2> 或 2>> ；
+* cut
+{{{
+[root@www ~]# cut -c 字符区间            <==用于排列整齐的信息
+选项与参数：
+-d  ：后面接分隔字符。与 -f 一起使用；
+-f  ：依据 -d 的分隔字符将一段信息分割成为数段，用 -f 取出第几段的意思；
+-c  ：以字符 (characters) 的单位取出固定字符区间；
+}}}
+* grep
+{{{
+[root@www ~]# grep [-acinv] [--color=auto] '搜寻字符串' filename
+选项与参数：
+-a ：将 binary 文件以 text 文件的方式搜寻数据
+-c ：计算找到 '搜寻字符串' 的次数
+-i ：忽略大小写的不同，所以大小写视为相同
+-n ：顺便输出行号
+-v ：反向选择，亦即显示出没有 '搜寻字符串' 内容的那一行！
+--color=auto ：可以将找到的关键词部分加上颜色的显示喔！
+}}}

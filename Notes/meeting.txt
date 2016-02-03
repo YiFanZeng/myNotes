@@ -1,0 +1,29 @@
+DATE: Fri Oct 30 18:03:03 CST 2015
+send reports email to ctvn.list
+work task
+	fix bug
+	GlusterFS, owner: Yuanwu Hu
+	Local Storage, owner: Yifan Zeng
+	Disk Lock
+	ocsetup i18N, owner: Yifan Zeng
+	Update SSL, owner: Yang Wu
+share
+	vdsm_storage
+	vdsm_network
+
+DATA: Fri Nov  6 10:38:13 CST 2015
+gerrit
+gitlab
+jenkins
+
+
+something should to do:
+	ovirt-node-upgrade principle
+
+read books
+	tcp/ip
+
+github
+	kernel
+	qemu
+	ovirt

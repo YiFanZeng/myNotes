@@ -1,0 +1,7 @@
+#! /bin/bash
+
+echo "=========== make image ========================="
+pushd /home/zengyf/ovirt-node/recipe
+make ctvn-image.iso
+popd > /dev/null
+echo "============= over ============================"

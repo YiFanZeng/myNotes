@@ -1,0 +1,50 @@
+1. /home/fenghuoOEM下的aio3.5、ctvm3.5、ovirt-node
+2. aio3.5: automedia.sh comps.xml makeiso.sh
+3. 生成aio：光盘文件在/home/fenghuoOEM/aio3.5/iso/里 将其打包即可
+[root@localhost iso]# cp ../automedia.sh .
+[root@localhost iso]# ./automedia.sh 
+[root@localhost iso]# rm -f automedia.sh 
+[root@localhost iso]# cd ../
+[root@localhost aio3.5]# ./makeiso.sh 
+[root@localhost aio3.5]# ls aio-3.5.0.0.10-20151020-175318.iso
+4. 替换rpm： /home/fenghuoOEM/aio3.5/iso/Packages
+5. 添加rpm： [root@localhost aio3.5]# vim comps.xml 并且add到Packages
+6. ctvm3.5和以上一样：光盘文件在/home/fenghuoOEM/ctvm3.5/iso/里 将其打包即可
+7. 修改版本号： /home/fenghuoOEM/aio3.5/iso/ks
+[root@localhost ks]# vim onestepha.cfg 
+[root@localhost ks]# vim ks.cfg 
+8. 替换rpm包括： all rpm
+http://192.168.0.200:8080/BACKUP2/IMVP/3.5/GA/
+http://192.168.0.200:8080/BACKUP2/IMVP/3.5/oem/fenghuo2/
+
+8.1 ctvm-tools替换：
+root@localhost ks]# cd /root/rpmbuild/SOURCES/ctvmtools-3.5-4
+[root@localhost ctvmtools-3.5-4]# ls
+ctvm-tools-setup.iso  virtio-win.iso  virtio-win.vfd
+[root@localhost SPECS]# rpmbuild -ba ctvmtools.spec
+8.2 spice-server 直接换包  
+/home/fenghuoOEM/aio3.5/iso/
+/home/fenghuoOEM/ctvm3.5/iso/    ctvm里面没有ovirt-engine-setup-plugin-allinone
+9. 192.168.60.25 123456 199.160
+10. 烽火node： http://192.168.0.237/Cerf/wy35fenghuo/
+
+build aio iso的基本步骤
+加rpm包
+	举例：[root@localhost aio3.5]# vim comps.xml 并且add到Packages
+替换rpm包
+	engine的更新所有的rpm
+	ctvc组的spice-server
+	ctvc组的tools更新
+		root@localhost ks]# cd /root/rpmbuild/SOURCES/ctvmtools-3.5-4
+		[root@localhost ctvmtools-3.5-4]# ls
+		ctvm-tools-setup.iso  virtio-win.iso  virtio-win.vfd
+		[root@localhost SPECS]# rpmbuild -ba ctvmtools.spec
+	ctui的更新
+	vdsm的更新
+更新字典
+	[root@localhost iso]# cp ../automedia.sh .
+	[root@localhost iso]# ./automedia.sh 
+	[root@localhost iso]# rm -f automedia.sh 
+生成iso
+	[root@localhost aio3.5]# ./makeiso.sh 
+	[root@localhost aio3.5]# ls aio-3.5.0.0.10-20151020-175318.iso

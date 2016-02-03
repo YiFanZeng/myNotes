@@ -1,0 +1,385 @@
+#! /bin/bash 
+
+# Originally written by kazutomo@turbolinux.co.jp ?
+#   with heavy changes by Akinobu Mita <mita@miraclelinux.com>
+
+set +x
+
+TIME="`date +%Y%m%d%H%M`"
+
+make_chroot_script () {
+
+    oldRPMS=$RPMS
+    oldROOT=$ROOT
+    
+    RPMS=/tmp/RPMS
+    ROOT=/
+    LOGFILE=/tmp/create-virbuild.log
+    
+#### Script for Executing on VIRBUILD ####
+########## Begin of chroot.sh ############
+    cat > $1 <<CHROOT
+#! /bin/bash
+
+export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/X11R6/bin
+
+rm -f $LOGFILE
+
+# mounting /proc and /sys
+echo "Mounting /proc and /sys ..."
+mkdir -p /sys /proc
+mount proc $ROOT/proc -t proc
+mount -t sysfs none /sys/
+
+echo "Initialize /dev/ ..."
+mkdir -p /dev/
+/bin/mknod /dev/null c 1 3 || exit 1
+/bin/mknod /dev/zero c 1 5 || exit 1
+/bin/mknod /dev/urandom c 1 9 || exit 1
+/bin/mknod /dev/tty c 5 0 || exit 1
+/bin/mknod /dev/tty1 c 4 1 || exit 1
+/bin/mknod /dev/tty2 c 4 2 || exit 1
+/bin/mknod /dev/tty3 c 4 3 || exit 1
+/bin/mknod /dev/tty4 c 4 4 || exit 1
+/bin/mknod /dev/tty5 c 4 5 || exit 1
+/bin/mknod /dev/tty6 c 4 6 || exit 1
+
+ln -s /proc/self/fd/0 /dev/stdin
+ln -s /proc/self/fd/1 /dev/stdout
+ln -s /proc/self/fd/2 /dev/stderr
+
+chmod 666 /dev/null
+
+rpm_options=""
+
+#$ROOT/bin/rpm --initdb --root $ROOT
+/bin/rpm --initdb
+
+echo "Checking dependency ... Please wait a few minutes."
+#$ROOT/bin/rpm -ivh $RPMS/*.rpm  --root $ROOT --test
+/bin/rpm -ivh $RPMS/*.rpm  --test
+_fail=\$?
+if [ "\$_fail" = "0" ]; then
+	echo "Test passed."
+else
+	echo 
+	echo "Test failed. Please input your choice:"
+	echo 
+	echo -e "\t1 for with --nodeps"
+	echo -e "\t2 for with --nodeps --force"
+	echo -e "\tanything else with nothing"
+	echo 
+	echo 
+	echo -n "Do you want to install forcely? (1/2/N)"
+
+	read _choice
+	case "\$_choice" in
+	  1)
+		echo "Run rpm with --nodeps"
+		rpm_options="--nodeps"
+		_force=1
+		;;
+	  2)
+		echo "Run rpm with --nodeps --force"
+		rpm_options="--nodeps --force"
+		_force=2
+		;;
+	  *)
+		echo "Abort to install."
+		exit 1
+	esac
+fi
+
+#echo "Press any key to continue "
+#read a
+
+echo "Installing packages ... Please wait a few minutes."
+# Begin install all rpm packs
+if [ "\$_fail" = "0" ]; then
+	#$ROOT/bin/rpm -ivh $RPMS/*.rpm \$rpm_options --root $ROOT | tee $LOGFILE
+	/bin/rpm -ivh $RPMS/*.rpm \$rpm_options | tee $LOGFILE
+	_install=\$?
+elif [ "\$_force" = "1" ]; then
+	#$ROOT/bin/rpm -ivh $RPMS/*.rpm \$rpm_options --root $ROOT | tee $LOGFILE
+	/bin/rpm -ivh $RPMS/*.rpm \$rpm_options | tee $LOGFILE
+	_install=\$?
+elif [ "\$_force" = "2" ]; then
+	#$ROOT/bin/rpm -ivh $RPMS/*.rpm \$rpm_options --root $ROOT | tee $LOGFILE
+	/bin/rpm -ivh $RPMS/*.rpm \$rpm_options | tee $LOGFILE
+	_install=\$?
+else
+	return 1
+fi
+
+# user for building
+/usr/sbin/useradd packager
+/usr/bin/passwd -d packager
+chmod 755 /home/packager
+
+if [ "\$_install" != "0" ] ; then
+	echo 
+	echo Please see $oldROOT/$LOGFILE
+	echo If you get any issues about dependency, 
+	echo Please try create-virbuild.sh with -f1 or -f2 option
+	exit 1
+else
+	/sbin/ldconfig
+	echo
+	echo "All Done. More info in $oldROOT/$LOGFILE."
+	echo
+fi
+CHROOT
+######### End of chroot.sh ###########
+
+    ROOT=$oldROOT
+    RPMS=$oldRPMS
+    chmod +x $1
+}
+
+missing_pkg() {
+	echo "Some packages is missing."
+	exit 1
+}
+
+# Install RPMs using cpio
+# usage: vague_inst Directory PACKAGE_FILE ...
+vague_inst () {
+#	set -x
+    inst_dir=$1
+    shift
+    mkdir -p $inst_dir
+    for i in $*
+    do
+		echo "try to unpack $i"
+        [ -f $i ] && rpm2cpio $i | (cd $inst_dir; cpio -idm; echo "unpacked $i")
+    done
+#	set +x
+}
+
+#
+# Main function
+
+# comment for not support relatively path
+#WORKDIR=`dirname $0`
+#cd $WORKDIR
+#WORKDIR=$PWD
+
+if [ -z "$2" ]; then
+	echo
+    echo -e "Usage: $0 LOCALPOOL VIRBUILDDIR\n"  
+    exit 0;
+fi
+
+if [ "$2" == "/" ] ; then
+    echo "Please try another directory"
+    exit 0;
+fi
+
+if [ -d $2 ] && [ $(ls --inode -dl $2 | awk '{print $1}' ) -eq \
+                  $(ls --inode -dl /  | awk '{print $1}' ) ]; then
+    echo "Please try another directory"
+    exit 0;
+fi
+
+# RPMS: Pool of RPMs
+# ROOT: Topdir of virbuild
+#RPMS=$1/RPMS
+RPMS=$1
+ROOT=$2
+
+# re-define ROOT
+mkdir -p $ROOT
+cd $ROOT
+ROOT="$PWD"
+
+#case $ROOT in
+#  /project/*/build/*)
+#	echo "Checking location passed."
+#	;;
+#  *)
+#	echo "Checking location failed."
+#	echo "You must create a virtual build in /project/*/build/."
+#	exit 1
+#	;;
+#esac
+
+if [ -f $ROOT/virbuild ]; then
+	echo "$ROOT is an existing virbuild."
+	echo "Please try another directory."
+	exit 1
+fi
+  
+echo "===== creating $ROOT======="
+umount $ROOT/proc >/dev/null 2>&1
+umount $ROOT/sys >/dev/null 2>&1
+
+rm -rf   $ROOT || exit 1
+mkdir -p $ROOT/var/lib/rpm	\
+         $ROOT/tmp/RPMS		\
+         $ROOT/bin		\
+         $ROOT/proc		\
+         $ROOT/root		\
+         $ROOT/sys		\
+         $ROOT/etc
+
+chmod 1777 $ROOT/tmp/
+chmod 1777 $ROOT/tmp/RPMS
+
+touch /etc/mtab
+cp /etc/hosts $ROOT/etc/
+cp /etc/localtime $ROOT/etc/
+
+# create /etc/fstab file
+cat >$ROOT/etc/fstab << "EOF"
+# /etc/fstab: static file system information.
+#
+# <file system> <mount point>   <type>  <options>       <dump>  <pass>
+/dev/proc       /proc           proc    defaults        0       0
+/dev/sys        /sys            sysfs   rw,noexec,nosuid,nodev          0 0
+/dev/devpts     /dev/pts        devpts  gid=5,mode=620  0 0
+EOF
+
+RPMS2=$ROOT/tmp/RPMS
+
+echo -n "Copying rpm packages into virbuild. Just waiting ... "
+# Copy RPMS to virbuild
+for i in $RPMS/*.rpm
+do
+	# hard link instead of copy for speedup, 
+	# localpool and virbuild are in the same partition is needed.
+#    ln $i $RPMS2/ 2>/dev/null || cp $i $RPMS2/ || { 
+                cp $i $RPMS2/ || {
+		echo "Failed to copy $i. Abort." ;
+		exit 1;
+		}
+done
+echo "Done."
+#cp $WORKDIR/dev-*.rpm $ROOT/tmp/RPMS/
+
+# remove unneeded packs:
+UNNEEDED_PACKS="PoseidonPPP ppp241 firstboot system-config-keyboard anthy-el-xemacs AdobeReader_* firefox-*-resources google-desktop-linux google-desktop-linux-oem-redflag ooobasis* openoffice.org* openoffice-fix perl-Frontier-RPC-Client pips pipslite xorg.conf-es xorg.conf-pt_BR kxk-pt_BR kxk-es kxk-ru_RU kde-i18n libxine-mini xorg-x11-drv-nvidia kmod-nvidia xorg-x11-drv-fglrx kmod-fglrx firstboot-tui anaconda rhythmbox"
+for loop in $UNNEEDED_PACKS;
+do
+	rm -vf $RPMS2/$loop-[[:digit:]]*
+done
+
+pushd $RPMS2/
+[ -f glibc-2.*i686.rpm ] && rm -vf glibc-2.*i[35]86.rpm
+[ -f glibc-2.*i586.rpm ] && rm -vf glibc-2.*i386.rpm
+[ -f glibc-headers-2.*i686.rpm ] && rm -vf glibc-headers-2.*i[35]86.rpm
+[ -f glibc-headers-2.*i586.rpm ] && rm -vf glibc-headers-2.*i386.rpm
+[ -f kernel-2.*i686.rpm ] && rm -vf kernel-2.*i[35]86.rpm kernel-devel-2.*i[35]86.rpm
+#echo "Press Enter to continue "
+#read a
+popd
+
+
+# Enable to work rpm command
+vague_inst $ROOT \
+         $RPMS2/glibc-2.*.*.rpm		\
+         $RPMS2/glibc-common-2.*.*.rpm	\
+         $RPMS2/glibc-devel-2.*.*.rpm	\
+		 $RPMS2/bzip2-libs-*.*.rpm	\
+         $RPMS2/libsepol-*.*.rpm	\
+         $RPMS2/popt-*.*.rpm		\
+         $RPMS2/elfutils-libelf-*.*.rpm	\
+         $RPMS2/beecrypt-[[:digit:]]*.*.rpm  \
+		 $RPMS2/sqlite-*.*.rpm  \
+		 $RPMS2/neon-*.*.rpm	 \
+		 $RPMS2/libacl-*.*.rpm	 \
+		 $RPMS2/libattr-*.*.rpm	 \
+		 $RPMS2/ncurses-libs.*.rpm	 \
+		 $RPMS2/ncurses-*.*.rpm	 \
+		 $RPMS2/openssl-[[:digit:]]*.*.rpm  \
+		 $RPMS2/krb5-libs-*.*.rpm \
+		 $RPMS2/e2fsprogs-libs-*.*.rpm \
+		 $RPMS2/expat-*.*.rpm \
+		 $RPMS2/libstdc++-*.*.rpm \
+		 $RPMS2/libcap-*.*.rpm \
+		 $RPMS2/coreutils-*.*.rpm \
+		 $RPMS2/libgcc*-*.*.rpm \
+		 $RPMS2/xz-libs*-*.*.rpm \
+		 $RPMS2/rpm-*.*.rpm || missing_pkg
+
+# libuuid
+vague_inst $ROOT $RPMS2/libuuid-[[:digit:]]*.rpm
+
+# Enable cpio
+vague_inst $ROOT $RPMS2/cpio-*.*.rpm
+
+# Enable to work bash command
+#vague_inst $ROOT $RPMS2/libtermcap-[^d]*.*.rpm
+vague_inst $ROOT $RPMS2/libtermcap-[[:digit:]]*.*.rpm
+vague_inst $ROOT $RPMS2/bash-*.*.rpm || missing_pkg
+
+# Enable to work install-info command
+#vague_inst $ROOT $RPMS2/zlib-[^d]*.*.rpm
+vague_inst $ROOT $RPMS2/zlib-[[:digit:]]*.*.rpm
+vague_inst $ROOT $RPMS2/info-*.*.rpm
+
+# mount
+vague_inst $ROOT $RPMS2/util-linux-*.*.rpm
+
+# MAKEDEV
+vague_inst $ROOT $RPMS2/MAKEDEV-*.*.rpm
+
+if [ -f /etc/resolv.conf ] ; then
+    cp /etc/resolv.conf $ROOT/etc/resolv.conf
+fi
+
+#vague_inst $ROOT/tmp $RPMS2/gzip-*.*.rpm
+#cp $ROOT/tmp/bin/gzip  $ROOT/bin/
+vague_inst $ROOT/ $RPMS2/gzip-*.*.rpm
+
+#vague_inst $ROOT/tmp $RPMS2/grep-*.*.rpm
+#cp $ROOT/tmp/bin/grep  $ROOT/bin/
+vague_inst $ROOT/ $RPMS2/grep-*.*.rpm
+
+vague_inst $ROOT/ $RPMS2/libselinux*.*.rpm
+vague_inst $ROOT/ $RPMS2/db4-*.rpm
+vague_inst $ROOT/ $RPMS2/file-libs*.rpm
+vague_inst $ROOT/ $RPMS2/lua-*.rpm
+vague_inst $ROOT/ $RPMS2/nss-*.rpm
+vague_inst $ROOT/ $RPMS2/nspr-*.rpm
+vague_inst $ROOT/ $RPMS2/libblkid-*.rpm
+
+#vague_inst $ROOT/ $RPMS2/dev-*.*.rpm
+
+touch $ROOT/etc/mtab
+
+echo $ROOT > $ROOT/etc/virtroot
+
+#cp /project/bin/simple-build-check.sh $ROOT/usr/bin
+
+if [ -f /etc/sysconfig/network ] ; then
+	mkdir -p $ROOT/etc/sysconfig/
+	cp /etc/sysconfig/network $ROOT/etc/sysconfig/ 
+fi
+
+if [ -f /etc/sysconfig/network-scripts/ifcfg-eth0 ] ; then
+	mkdir -p $ROOT/etc/sysconfig/network-scripts/
+	cp /etc/sysconfig/network-scripts/ifcfg-eth0 \
+	 $ROOT/etc/sysconfig/network-scripts/ 
+fi
+
+#mkdir -p /sys /proc
+#mount proc $ROOT/proc -t proc
+#mount -t sysfs none /sys/
+
+ 
+# change root(/) directory
+make_chroot_script $ROOT/tmp/chroot.sh || exit 1
+/usr/sbin/chroot $ROOT /tmp/chroot.sh || exit 1
+
+echo "virbuild $TIME"> $ROOT/virbuild
+virbuildname=`basename $ROOT`
+echo $virbuildname > $ROOT/etc/$virbuildname
+rm -f $ROOT/usr/tmp
+
+#cp /project/koumei/build/virbuild/etc/fstab $ROOT/etc
+#cp /project/koumei/build/virbuild/etc/mtab $ROOT/etc
+#cp /project/koumei/build/virbuild/etc/hosts $ROOT/etc
+#cp /project/koumei/build/virbuild/etc/httpd/conf/httpd.conf $ROOT/etc/httpd/conf/
+#mv $ROOT/etc/rpm $ROOT/etc/rpm.bak
+#cp /project/koumei/build/virbuild/etc/rpm $ROOT/etc -rfa
+

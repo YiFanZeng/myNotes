@@ -1,0 +1,29 @@
+[core]
+        repositoryformatversion = 0
+        filemode = true
+        bare = false
+        logallrefupdates = true
+[remote "origin"]
+        fetch = +refs/heads/*:refs/remotes/origin/*
+        url = git://192.168.0.200/ovirt-node
+[branch "master"]
+        remote = origin
+        merge = refs/heads/master
+[branch "cerf"]
+        remote = origin
+        merge = refs/heads/cerf
+[sendemail]
+        smtpserver = smtp.cloud-times.com # 公司的 smtp 服務器地址
+        smtpserverport = 25 #25 端口，貌似公司沒配置 ssl，只能用非加密發送
+        smtpuser = zengyf@cloud-times.com # 用戶名
+        smtppass =  # 密碼
+       # to = ctvi.list@cloud-times.com # 發送到的列表
+        to = zengyf@cloud-times.com # 發送到的列表
+        smtpdomain = mail.cloud-times.com
+        multiedit = false # --annotate 時有效，下面詳細介紹
+        confirm = auto # 看文檔
+        suppresscc = all # 不 cc 作者
+	#cc = maxl@cloud-times.com
+[user]
+	email = zengyf@cloud-times.com
+	name = zengyf

@@ -1,0 +1,11 @@
+tcp dump
+
+tcp/ip 概述
+
+vlan, vxlan
+
+网际层：ARP, RARP, ICMP, IGMP
+
+流程
+	初始化：内核，设备，网络
+	发包流程：应用层send, 内核

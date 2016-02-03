@@ -1,0 +1,6 @@
+start vm
+migration vm
+which vm need migration
+
+cluster policy
+filter scheduler in openstack

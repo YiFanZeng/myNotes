@@ -1,0 +1,47 @@
+SepNote
+
+1. pci相关命令
+查看所有pci设备：[root@jobs-zeng-com ~]# lspci 
+[root@jobs-zeng-com ~]# lspci -v
+查看某个pci设备的详细信息：[root@jobs-zeng-com ~]# lspci -s 04:00.2 -vv
+
+2. 关于连接wifi的操作
+链接： http://blog.csdn.net/cat_lover/article/details/7088873
+查询命令： [root@jobs-zeng-com ~]# rfkill list all； 以下是ok的
+0: asus-wlan: Wireless LAN
+	Soft blocked: no
+	Hard blocked: no
+1: phy0: Wireless LAN
+	Soft blocked: no
+	Hard blocked: no
+连接为ifi即可获得ip。
+
+3. 使用spice打开虚拟机桌面
+spicec -h 192.168.70.173 -p 3931
+
+4. fedora配置桥
+[root@jobs-zeng-com network-scripts]# cat ifcfg-enp4s0f2 
+HWADDR="40:16:7E:EB:F2:72"
+TYPE="Ethernet"
+BOOTPROTO="none"
+DEFROUTE="yes"
+IPV4_FAILURE_FATAL="yes"
+IPV6INIT="no"
+IPV6_AUTOCONF="no"
+IPV6_DEFROUTE="no"
+IPV6_FAILURE_FATAL="no"
+NAME="enp4s0f2"
+UUID="646f375d-2023-4817-a960-ffbad8a233a6"
+ONBOOT="yes"
+PEERDNS="yes"
+PEERROUTES="yes"
+IPV6_PEERDNS="no"
+IPV6_PEERROUTES="no"
+BRIDGE=networkmgmt
+
+[root@jobs-zeng-com network-scripts]#cat ifcfg-networkmgmt
+DEVICE="networkmgmt"
+TYPE="Bridge"
+BOOTPROTO="dhcp"
+ONBOOT="yes"
+

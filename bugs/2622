@@ -1,0 +1,157 @@
+http://www.ocselected.org/wiki/Features/Self_Hosted_Engine_Maintenance_Flows
+
+----------------------------------------------
+[root@test ~]# hosted-engine --set-maintenance --help
+Usage: /usr/sbin/hosted-engine set-maintenance --mode=<mode>
+    Set maintenance status to the specified mode.  Valid values are:
+    'global', 'local', and 'none'.
+    Available only after deployment has completed.
+
+-------------------------------------------------
+"src/bin/hosted-engine.in" 403 lines --93%--                                                                                        376,1         92%
+ 
+    if [ -r "${conf}" ] ; then
+        python -m ovirt_hosted_engine_setup.set_maintenance "${mode}"
+    else
+        echo "You must run deploy first"
+    fi
+
+-----------------------------
+[root@pc ovirt-hosted-engine-setup]# vim src/ovirt_hosted_engine_setup/set_maintenance.py
+
+"""Set maintenance mode for hosted engine VM"""
+
+from ovirt_hosted_engine_ha.client import client
+
+    def set_mode(self, mode):
+        ha_cli = client.HAClient()
+
+        m_local = (mode == 'local')
+        m_global = (mode == 'global')
+        try:
+            ha_cli.set_maintenance_mode(
+                mode=ha_cli.MaintenanceMode.LOCAL,
+                value=m_local,
+            )
+            ha_cli.set_maintenance_mode(
+                mode=ha_cli.MaintenanceMode.GLOBAL,							# 'GLOBAL'
+                value=m_global,												# Ture
+            )
+            
+            
+-----------------------
+another project
+[root@pc ovirt-hosted-engine-ha]# vim ovirt_hosted_engine_ha/client/client.py 
+
+   class MaintenanceMode(object):
+        """
+        Constants used in calls to set maintenance mode:
+          LOCAL - local host maintenance
+          GLOBAL - global maintenance
+        """
+        LOCAL = 'LOCAL'
+        GLOBAL = 'GLOBAL'
+
+    def set_maintenance_mode(self, mode, value):										# ('GLOBAL', True)
+        if mode == self.MaintenanceMode.GLOBAL:
+            self.set_global_md_flag(self.GlobalMdFlags.MAINTENANCE,						# 'maintenance', 'True'
+                                    str(value))
+
+        elif mode == self.MaintenanceMode.LOCAL:
+            if self._config is None:
+                self._config = config.Config()
+            self._config.set(config.HA,
+                             config.LOCAL_MAINTENANCE,
+                             str(util.to_bool(value)))
+
+        else:
+            raise Exception("Invalid maintenance mode: {0}".format(mode))
+
+---------------------
+            md_dict[flag] = put_val														# put_val = 'True'
+            block = metadata.create_global_metadata_from_dict(md_dict)					# block = "MAINTENANCE=True"
+            broker.put_stats_on_storage(												# SERVICE_TYPE = 'hosted-engine' MD_EXTENSION = '.metadata'
+                constants.SERVICE_TYPE + agent_constants.MD_EXTENSION,
+                0,
+                block)
+
+ ----------------------------
+     def put_stats_on_storage(self, service_type, host_id, data):
+        """
+        Puts data on the shared storage according to the parameters.
+        Data should be passed in as a string.
+        """
+        self._log.debug("Storing blocks on storage for %s", service_type)
+        # broker expects blocks in hex format
+        hex_data = base64.b16encode(data)
+        request = ("put-stats"
+                   " service_type={0} host_id={1} data={2}"
+                   .format(service_type, host_id, hex_data))
+        self._checked_communicate(request)												# ("put-stats hosted-engine.metadata 0 MAINTENANCE=True")
+ 
+----------------------------------
+    def _checked_communicate(self, request):
+        """
+        Wrapper around _communicate() which checks for success/failure.
+        On failure, throws an exception with the failure message.
+        On success, returns the result without the "success" prefix.
+        """
+        response = self._communicate(request)											# ("put-stats hosted-engine.metadata 0 MAINTENANCE=True")
+        try:
+            status, message = response.split(" ", 1)
+        except ValueError:
+            status, message = response, ""
+
+        if status == "success":
+            self._log.debug("Successful response from socket")
+            return message
+        else:
+            self._log.debug("Failed response from socket")
+            raise RequestError("Request failed: {0}"
+                               .format(message or response))
+
+-----------------------------------
+    def _communicate(self, request):
+        """
+        Sends a request to the (already-connected) ha-broker, waits for a
+        response, and returns it to the caller.  Both the request and
+        response are non-newline-terminated strings.
+
+        On disconnection, raises DisconnectionError.
+        """
+        if not self.is_connected():
+            raise DisconnectionError("Not connected to broker")
+
+        self._log.debug("Sending request: %s", request)
+        try:
+            util.socket_sendline(self._socket, self._log, request)						# ("put-stats hosted-engine.metadata 0 MAINTENANCE=True")
+            response = util.socket_readline(self._socket, self._log,
+                                            isTimed=True)
+        except DisconnectionError as ex:
+            self._log.error("Connection closed: " + str(ex))
+            self.disconnect()
+            raise
+        self._log.debug("Full response: %s", response)
+        return response
+
+--------------------------------------------
+def socket_sendline(sock, log, data):
+    """
+    Writes data to a socket, appending a newline.  Returns normally, or
+    raises DisconnectionError if the write could not be completed.
+    """
+    try:
+        sock.sendall(data + "\n")														# ("put-stats hosted-engine.metadata 0 MAINTENANCE=True")
+    except IOError as e:
+        log.debug("Connection closed while writing to socket: %s", str(e))
+        raise DisconnectionError("Connection closed")
+    return
+
+
+
+
+
+
+
+
+
