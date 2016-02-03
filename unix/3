@@ -1,0 +1,61 @@
+文件I/O
+
+3.1 引言
+    I/O函数：open, read, write, lseek, close
+    不带缓冲的I/O：unbuffered I/O; 调用内核中的一个系统调用
+    多个进程间共享资源？
+    原子操作？
+
+3.2 文件描述符
+    非负整数；打开或创建文件，内核向进程返回一个文件描述符
+    shell把文件描述符0与进程的标准输入关联; STDIN_FILENO
+                  ...1...         输出...; STDOUT_FILENO
+                  ...2...         错误...  STDERR_FILENO
+
+3.3 函数open和openat
+    打开或者创建一个文件; 两函数的返回值：若成功，文件描述符；若出错，-1
+#include <fcntl.h>
+int open(const char *path, int oflag, ... /* mode_t mode */);
+int openat(int fd, const char *path, int oflag, ... /* mode_t mode */);
+    path参数是要打开或创建文件的名字
+    oflag参数：O_RDONLY; O_WRONLY; O_RDWD; O_EXEC; O-SEARCH(必选一个)
+               其他可选常量
+    fd参数：把open和openat函数区分开
+            ...
+
+3.4 函数creat
+    创建一个新文件
+#include <fcntl.h>
+int creat(const char *path, mode_t mode);
+    等效
+open(path, O_WRONLY|O_CREATE|O_TRUNC, mode);
+
+3.5 函数close
+    关闭一个打开的文件
+#include <unistd.h>
+int close(int fd);
+
+3.6 函数lseek
+    当前文件偏移量current file offset
+#include <unistd.h>
+off_t lseek(int fd, off_t offset, int whence)
+    返回值：成功，新的文件偏移量；出错，-1
+    whence:SEEK_SET; SEEK_CUR; SEEK_END
+
+3.7 函数read
+    从打开文件中读数据
+#include <unistd.h>
+ssize_t read(int fd, void *buf, size_t nbytes);
+    返回值：读到的字节数，若读到文件尾端，返回0；若出错，-1
+
+3.8 函数write
+    向打开文件写数据
+#include <unistd.h>
+ssize_t write(int fd, const void *buf, size_t nbytes);
+    返回值：成功，返回已写的字节数；出错，-1
+
+3.9 I/O的效率（暂未详看）
+
+3.10 文件共享（暂未详看）
+
+3.11 原子操作
