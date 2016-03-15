@@ -1,0 +1,34 @@
+1.	Wangli
+Basic skills
+Principle(why, how)
+Read&write code
+Learning ability, problem-solving ability
+Summary once in a while
+2.	Skills
+Git
+RPM/spec, jenkins
+XML_RPC
+JSON
+Linux commands: sed, ps, grep, lslbk, bldid
+Autotools: autoconf, automake, 
+
+3.	Ovirt
+Architecture: engine, admin/user partal, reset aip, cli/sdk, DB, HOST AGENT, GUEST AGENT, AD/IPA, DWH, REPORTS ENGINE, SPICE CLIENT
+4.	Program language
+Python
+SQL
+5.	Knowledge poins
+Ipmitool –I lanplus –H hostip –U user –P passwd 
+Virsh: saslpasswd –a libvirt root
+Mount –o remount, rw /
+Rpm: whatprovides, rpm2cpio
+Yes | mkfs.ext4 /dev/sdb
+Disk: fdisk /dev/sdb; pvcreate /dev/sdb1; vgcreate vgtest /dev/sdb1, vtextend vgtest /dev/sdb2, lvcreate –L 200M –n vgtest1 vgtest, vgremove vgtest, lvremove –f vgtest1/vgtest, pvremove /dev/sdb2, parted –s /dev/sdb rm 1,
+Modprobe –r tg3
+Git: git commit –amend, git rebase –I HEAD~3, git checkout filename, git fetch –v, git diff, git status, git add, git commit –s, git push, git pull, git reset HEAD^, git log –oneline, git relflog, git rebase commitNo, git cherry-pick
+Linux os: post – BIOS – MBR – BOOTLOADER – KERNEL – INITRD - /etc/init
+Yum: yumdownloader –source rpmname
+Bug: invalid not a bug, wontfix it’s a bug but would not fix, duplicate have the bug already, worksforme do not have the bug in current version
+DATA = ‘data + %Y%m%d%H%m’
+6.	Books
+系统虚拟化
