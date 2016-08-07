@@ -1,0 +1,71 @@
+- 在这样的情况下，原始字符串就派上用场了。原始字符串不会把反斜线当做特殊字符。在原始字符串中输入的每个字符都会与书写的方式保持一致：
+``` python
+>>> print r"C:\Program Files\foo"
+C:\Program Files\foo
+>>> print r"C:\Program Files\foo\"
+  File "<stdin>", line 1
+    print r"C:\Program Files\foo\"
+                                 ^
+SyntaxError: EOL while scanning string literal
+>>> print r"C:\Program Files\foo\\"
+C:\Program Files\foo\\
+>>> print r"C:\Program Files\foo""\\"
+C:\Program Files\foo\
+```
+
+- list and join
+``` python
+>>> test = list("hello")
+>>> test
+['h', 'e', 'l', 'l', 'o']
+>>> "".join(test)
+'hello'
+```
+
+- 对象.方法(参数)append; count; extend, index, insert, pop, remove, reverse, sort
+``` python
+>>> lst = [1, 2, 3]
+>>> lst.append(4)
+>>> lst
+[1, 2, 3, 4]
+
+>>> ["to", "be", "or", "not", "to", "be"].count("to")
+2
+>>> x = [[1, 2], 1, 1, [2, 1, [1, 2]]] 
+>>> x.count(1)
+2
+>>> x.count([1, 2])
+1
+
+>>> a = [1, 2, 3] 
+>>> b = [4, 5, 6] 
+>>> a.extend(b) 
+>>> a
+[1, 2, 3, 4, 5, 6]
+
+>>> test = [4, 6, 2, 1, 7, 9]
+>>> reversed(test)
+<listreverseiterator object at 0x15fb710>
+>>> list(reversed(test))
+[9, 7, 1, 2, 6, 4]
+>>> test.sort()
+>>> test
+[1, 2, 4, 6, 7, 9]
+
+>>> x = [4, 6, 2, 1, 7, 9]
+>>> y = x
+>>> y.sort()
+>>> x
+[1, 2, 4, 6, 7, 9]
+>>> y
+[1, 2, 4, 6, 7, 9]
+>>> x = [4, 6, 2, 1, 7, 9]
+>>> y = x[:]
+>>> y.sort()
+>>> x
+[4, 6, 2, 1, 7, 9]
+>>> y
+[1, 2, 4, 6, 7, 9]
+
+
+```
