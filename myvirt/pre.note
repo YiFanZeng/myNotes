@@ -1,0 +1,11 @@
+vm operation:
+    boot                        Boot a new server.
+    delete                      Immediately shut down and delete specified
+                                server(s).
+    reboot                      Reboot a server.
+
+
+function:
+    flavor
+
+
