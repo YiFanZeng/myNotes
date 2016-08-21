@@ -1,0 +1,25 @@
+[root@ip-172-31-26-104 ~]# python
+Python 2.7.5 (default, Oct 11 2015, 17:47:16) 
+[GCC 4.8.3 20140911 (Red Hat 4.8.3-9)] on linux2
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import mysql.connector
+>>> conn = mysql.connector.connect(user='zengyf', password='Dlmmsh5243145', database='test')
+>>> cursor = conn.cursor()
+>>> cmd_create_table = 'create table user (id varchar(20) primary key, name varchar(20))'
+>>> cursor.execute(cmd_create_table)
+>>> cursor.rowcount
+0
+>>> cursor.execute('insert into user (id, name) values (%s, %s)', ['1', 'Michael'])
+>>> cursor.rowcount
+1
+>>> conn.commit()
+>>> cursor.close()
+True
+>>> cursor = conn.cursor()
+>>> cursor.execute('select * from user where id = %s', ('1',))
+>>> values = cursor.fetchall()
+>>> values
+[(u'1', u'Michael')]
+>>> cursor.close()
+True
+>>> conn.close()

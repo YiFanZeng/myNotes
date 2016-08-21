@@ -11,3 +11,8 @@ MariaDB [mysql]> SHOW DATABASES;
 MariaDB [mysql]> SHOW TABLES;
 
 MariaDB [mysql]> SHOW COLUMNS FROM user;
+
+MariaDB [(none)]> use test;
+Database changed
+
+
