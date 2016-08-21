@@ -1,8 +1,13 @@
 [root@ip-172-31-26-104 ~]# mysqladmin -u root -p password newpassword
 Enter password: 
+
 [root@ip-172-31-26-104 ~]# mysql -u root -p
 Enter password: 
 
 MariaDB [mysql]> SELECT user, password FROM user;
+
 MariaDB [mysql]> SHOW DATABASES;
 
+MariaDB [mysql]> SHOW TABLES;
+
+MariaDB [mysql]> SHOW COLUMNS FROM user;
