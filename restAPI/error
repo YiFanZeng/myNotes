@@ -1,0 +1,16 @@
+http://172.18.15.135/api/wafs/162e25d7-4502-4917-8992-d34758085d2d?date=1471835256&sign=virtual.user:c0918fcf9aa724f1840254211a68e668
+Traceback (most recent call last):
+  File "autotest_wafs.py", line 71, in <module>
+    test.api_wafs(waf_id)
+  File "autotest_wafs.py", line 64, in api_wafs
+    resp = common.auto_resp('GET', wafs_url)
+  File "/opt/webservice_new/test_zyf/autotest_common.py", line 35, in auto_resp
+    resp = http.request(method, url, **kwargs)
+  File "/usr/lib/python2.7/site-packages/requests/sessions.py", line 465, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/usr/lib/python2.7/site-packages/requests/sessions.py", line 573, in send
+    r = adapter.send(request, **kwargs)
+  File "/usr/lib/python2.7/site-packages/requests/adapters.py", line 415, in send
+    raise ConnectionError(err, request=request)
+requests.exceptions.ConnectionError: ('Connection aborted.', error(111, 'Connection refused'))
+
